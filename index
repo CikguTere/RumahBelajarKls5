@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rumah Belajar Kelas 5 - Sekolah Dasar</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
+        }
+        /* Custom scrollbar for chat box */
+        #chat-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        #chat-content::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 10px;
+        }
+        .tab-button.active {
+            border-color: #10b981;
+            color: #10b981;
+            font-weight: 600;
+        }
+        .material-iframe {
+            width: 100%;
+            height: 400px;
+            border-radius: 0.5rem;
+            border: 2px solid #e2e8f0;
+        }
+        .floating-chat {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            transition: all 0.3s ease;
+        }
+        .embed-responsive-container {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 aspect ratio */
+            height: 0;
+            overflow: hidden;
+            border-radius: 0.5rem;
+        }
+        .embed-responsive-container iframe,
+        .embed-responsive-container .material-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, query, onSnapshot, getDoc, updateDoc, arrayUnion, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // EXPOSE FIRESTORE FUNCTIONS TO GLOBAL SCOPE (FIX: ReferenceError: collection is not defined)
+        window.collection = collection;
+        window.doc = doc;
+        window.setDoc = setDoc;
+        window.query = query;
+        window.onSnapshot = onSnapshot;
+        window.getDoc = getDoc;
+        window.updateDoc = updateDoc;
+        window.arrayUnion = arrayUnion;
+        window.deleteDoc = deleteDoc;
+
+
+        setLogLevel('Debug');
+
+        // Global variables for Firebase access
+        window.firebaseApp = null;
+        window.db = null;
+        window.auth = null;
+        window.currentUserId = null;
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Initialize Firebase
+        if (Object.keys(firebaseConfig).length > 0) {
+            window.firebaseApp = initializeApp(firebaseConfig);
+            window.db = getFirestore(window.firebaseApp);
+            window.auth = getAuth(window.firebaseApp);
+        } else {
+            console.error("Firebase config is missing. Data persistence will not work.");
+        }
+
+        // Handle Authentication
+        if (window.auth) {
+            onAuthStateChanged(window.auth, async (user) => {
+                if (user) {
+                    window.currentUserId = user.uid;
+                } else {
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(window.auth, initialAuthToken);
+                        } else {
+                            const anonymousUser = await signInAnonymously(window.auth);
+                            window.currentUserId = anonymousUser.user.uid;
+                        }
+                    } catch (error) {
+                        console.error("Firebase Auth Error:", error);
+                        // Fallback to random ID if authentication fails
+                        window.currentUserId = 'guest-' + crypto.randomUUID();
+                    }
+                }
+                document.getElementById('loading-overlay').classList.add('hidden');
+                document.getElementById('app-container').classList.remove('hidden');
+                window.renderApp(); // Render the app once auth is ready
+            });
+        } else {
+            // Run without Firebase if config is missing
+            window.currentUserId = 'guest-' + crypto.randomUUID();
+            document.getElementById('loading-overlay').classList.add('hidden');
+            document.getElementById('app-container').classList.remove('hidden');
+            window.renderApp();
+        }
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-white flex items-center justify-center z-50">
+        <div class="text-xl font-semibold text-teal-600 flex items-center space-x-2">
+            <svg class="animate-spin h-5 w-5 text-teal-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>Memuat Rumah Belajar...</span>
+        </div>
+    </div>
+
+    <!-- Main Application Container -->
+    <div id="app-container" class="hidden">
+        <!-- Header/Navbar -->
+        <header class="bg-white shadow-lg sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row justify-between items-center">
+                <h1 class="text-3xl font-bold text-teal-600 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 mr-2 text-yellow-500" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2.586l.293.293A1 1 0 0010 15v1a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/>
+                    </svg>
+                    Rumah Belajar Kelas 5
+                </h1>
+                <nav id="tabs" class="mt-4 sm:mt-0 flex space-x-2 sm:space-x-4 border-b border-gray-200">
+                    <!-- Tab Buttons will be rendered here by JS -->
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div id="content-container">
+                <!-- Content of the active tab (Mata Pelajaran, Tentang, Admin, Bantuan) -->
+            </div>
+        </main>
+
+        <!-- Floating Chat Button (Cikgu Tere) -->
+        <div class="floating-chat">
+            <button id="chat-toggle" class="bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-lg transition duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+            </button>
+        </div>
+
+        <!-- Chat Modal -->
+        <div id="chat-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[1001]">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-md m-4 flex flex-col">
+                <!-- Chat Header -->
+                <div class="p-4 border-b bg-teal-600 rounded-t-xl text-white flex justify-between items-center">
+                    <h3 class="text-xl font-bold">Cikgu Tere 🤖</h3>
+                    <button id="chat-close" class="text-white hover:text-gray-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                <!-- Chat Content -->
+                <div id="chat-content" class="flex-grow p-4 space-y-4 overflow-y-auto h-96">
+                    <!-- Initial Bot Message -->
+                    <div class="flex justify-start">
+                        <div class="bg-gray-200 text-gray-800 p-3 rounded-xl rounded-bl-none max-w-[80%] shadow-md">
+                            <p>Halo, saya Cikgu Tere! Selamat datang di Rumah Belajar. Ada yang bisa saya bantu jelaskan tentang pelajaran Kelas 5 hari ini?</p>
+                        </div>
+                    </div>
+                </div>
+                <!-- Chat Input -->
+                <div class="p-4 border-t flex space-x-2">
+                    <input type="text" id="chat-input" placeholder="Tanyakan pada Cikgu Tere..." class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500">
+                    <button id="chat-send" class="bg-teal-600 hover:bg-teal-700 text-white p-3 rounded-lg shadow-md transition duration-150 disabled:bg-teal-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Generic Modal for Admin Login/Error/Confirmation -->
+        <div id="generic-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[2000]">
+            <div id="modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-sm m-4 p-6 flex flex-col">
+                <!-- Modal content goes here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Global State Management ---
+        window.appState = {
+            activeTab: 'mapel', // 'mapel', 'tentang', 'admin', 'bantuan'
+            isAdmin: false,
+            subjects: [], // Data loaded from Firestore
+            selectedSubjectId: null,
+            selectedChapterId: null,
+            selectedMaterialId: null,
+        };
+
+        const ADMIN_PASSWORD = "admin123";
+        const ADMIN_ROOT_PATH = `artifacts/${window.appId}/users/admin_placeholder/admin_settings`;
+        const SUBJECTS_COLLECTION_PATH = (appId) => `artifacts/${appId}/public/data/subjects`;
+
+        // --- Core UI Functions ---
+
+        /** Switches the application tab. */
+        window.switchTab = (tabName) => {
+            window.appState.activeTab = tabName;
+            window.renderApp();
+        };
+
+        /** Renders the main application based on the current state. */
+        window.renderApp = () => {
+            window.renderTabs();
+            window.renderContent(); // <-- FIXED: Calling from window scope
+            // Re-attach Firestore listener if DB is ready
+            if (window.db && !window.firestoreListener) {
+                window.setupFirestoreListener(); // <-- FIXED: Calling from window scope
+            }
+        };
+
+        /** Renders the tab navigation bar. */
+        window.renderTabs = () => { // <-- FIXED: Exposed to window scope
+            const tabsContainer = document.getElementById('tabs');
+            const tabs = [
+                { id: 'mapel', label: 'Mata Pelajaran' },
+                { id: 'tentang', label: 'Tentang' },
+                { id: 'admin', label: 'Pengaturan Admin' },
+                { id: 'bantuan', label: 'Bantuan' },
+            ];
+
+            tabsContainer.innerHTML = tabs.map(tab => `
+                <button onclick="window.switchTab('${tab.id}')"
+                        class="tab-button px-4 py-2 border-b-2 transition duration-150 ease-in-out
+                               ${window.appState.activeTab === tab.id ? 'active border-teal-600 text-teal-600' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'}">
+                    ${tab.label}
+                </button>
+            `).join('');
+        };
+
+        /** Renders the content of the active tab. */
+        window.renderContent = () => { // <-- FIXED: Exposed to window scope
+            const container = document.getElementById('content-container');
+            container.innerHTML = '';
+            
+            switch (window.appState.activeTab) {
+                case 'mapel':
+                    if (window.appState.selectedMaterialId) {
+                        renderMaterialDetail(container);
+                    } else if (window.appState.selectedChapterId) {
+                        renderChapterDetail(container);
+                    } else if (window.appState.selectedSubjectId) {
+                        renderSubjectDetail(container);
+                    } else {
+                        renderSubjectCards(container);
+                    }
+                    break;
+                case 'tentang':
+                    renderAbout(container);
+                    break;
+                case 'admin':
+                    window.appState.isAdmin ? renderAdminPanel(container) : renderAdminLogin(container);
+                    break;
+                case 'bantuan':
+                    renderHelp(container);
+                    break;
+                default:
+                    renderSubjectCards(container);
+            }
+        };
+
+        // --- Content Rendering Functions ---
+
+        /** Renders subject cards. */
+        const renderSubjectCards = (container) => {
+            container.innerHTML = `
+                <h2 class="text-3xl font-extrabold text-gray-900 mb-6">Pilih Mata Pelajaran</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6" id="subject-cards">
+                    ${window.appState.subjects.length > 0 ? window.appState.subjects.map(subject => `
+                        <div onclick="window.selectSubject('${subject.id}')"
+                            class="bg-white rounded-xl shadow-lg hover:shadow-xl transition duration-300 transform hover:-translate-y-1 cursor-pointer p-6 border-b-4 border-teal-500">
+                            <div class="text-5xl mb-4">${subject.icon || '📚'}</div>
+                            <h3 class="text-xl font-semibold text-gray-800">${subject.name}</h3>
+                            <p class="text-gray-500 text-sm mt-1">${subject.chapters ? subject.chapters.length : 0} Bab Tersedia</p>
+                        </div>
+                    `).join('') : `
+                        <p class="col-span-3 text-center text-gray-500">Belum ada mata pelajaran. Silakan masuk ke Pengaturan Admin untuk menambahkan.</p>
+                    `}
+                </div>
+            `;
+        };
+        
+        window.selectSubject = (subjectId) => {
+            window.appState.selectedSubjectId = subjectId;
+            window.appState.selectedChapterId = null;
+            window.appState.selectedMaterialId = null;
+            window.renderApp();
+        };
+
+        window.selectChapter = (chapterId) => {
+            window.appState.selectedChapterId = chapterId;
+            window.appState.selectedMaterialId = null;
+            window.renderApp();
+        };
+
+        window.selectMaterial = (materialId) => {
+            window.appState.selectedMaterialId = materialId;
+            window.renderApp();
+        };
+
+        window.goBackToSubjects = () => {
+            window.appState.selectedSubjectId = null;
+            window.appState.selectedChapterId = null;
+            window.appState.selectedMaterialId = null;
+            window.renderApp();
+        };
+        
+        window.goBackToChapters = () => {
+            window.appState.selectedChapterId = null;
+            window.appState.selectedMaterialId = null;
+            window.renderApp();
+        };
+
+        /** Renders the chapters for a selected subject. */
+        const renderSubjectDetail = (container) => {
+            const subject = window.appState.subjects.find(s => s.id === window.appState.selectedSubjectId);
+            if (!subject) return window.goBackToSubjects();
+
+            container.innerHTML = `
+                <button onclick="window.goBackToSubjects()" class="flex items-center text-teal-600 hover:text-teal-800 mb-6">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                    </svg>
+                    Kembali ke Mata Pelajaran
+                </button>
+                <h2 class="text-3xl font-extrabold text-gray-900 mb-8 flex items-center">
+                    <span class="text-5xl mr-3">${subject.icon || '📚'}</span> ${subject.name}
+                </h2>
+                
+                <div class="space-y-4">
+                    ${(subject.chapters || []).length > 0 ? subject.chapters.map((chapter, index) => `
+                        <div onclick="window.selectChapter('${chapter.id}')"
+                            class="bg-white p-5 rounded-xl shadow-md hover:shadow-lg transition duration-200 cursor-pointer border-l-4 border-yellow-500 flex justify-between items-center">
+                            <div>
+                                <h4 class="text-xl font-semibold text-gray-800">Bab ${index + 1}: ${chapter.title}</h4>
+                                <p class="text-gray-500 text-sm">${(chapter.materials || []).length} Materi</p>
+                            </div>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                        </div>
+                    `).join('') : `
+                        <p class="text-center text-gray-500 bg-white p-6 rounded-xl shadow-md">Belum ada Bab untuk mata pelajaran ini.</p>
+                    `}
+                </div>
+            `;
+        };
+        
+        /** Renders materials for a selected chapter. */
+        const renderChapterDetail = (container) => {
+            const subject = window.appState.subjects.find(s => s.id === window.appState.selectedSubjectId);
+            const chapter = subject?.chapters?.find(c => c.id === window.appState.selectedChapterId);
+            if (!subject || !chapter) return window.goBackToSubjects();
+
+            container.innerHTML = `
+                <button onclick="window.goBackToChapters()" class="flex items-center text-teal-600 hover:text-teal-800 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                    </svg>
+                    Kembali ke Daftar Bab (${subject.name})
+                </button>
+                <h2 class="text-3xl font-extrabold text-gray-900 mb-8">${chapter.title}</h2>
+                
+                <div class="space-y-4">
+                    ${(chapter.materials || []).length > 0 ? chapter.materials.map((material) => `
+                        <div onclick="window.selectMaterial('${material.id}')"
+                            class="bg-white p-5 rounded-xl shadow-md hover:shadow-lg transition duration-200 cursor-pointer flex justify-between items-center border-l-4 ${getMaterialColor(material.type)}">
+                            <div>
+                                <p class="text-sm font-medium text-gray-500">${getMaterialTypeLabel(material.type)}</p>
+                                <h4 class="text-xl font-semibold text-gray-800">${material.title}</h4>
+                            </div>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                            </svg>
+                        </div>
+                    `).join('') : `
+                        <p class="text-center text-gray-500 bg-white p-6 rounded-xl shadow-md">Belum ada materi untuk bab ini.</p>
+                    `}
+                </div>
+            `;
+        };
+
+        const getMaterialColor = (type) => {
+            switch(type) {
+                case 'video': return 'border-red-500';
+                case 'embed': return 'border-blue-500';
+                case 'quiz': return 'border-purple-500';
+                default: return 'border-gray-300';
+            }
+        }
+        
+        const getMaterialTypeLabel = (type) => {
+            switch(type) {
+                case 'video': return 'Video Pembelajaran 🎬';
+                case 'embed': return 'Materi Terintegrasi 🌐';
+                case 'quiz': return 'Kuis Interaktif 📝';
+                default: return 'Materi Lain';
+            }
+        }
+
+        /** Renders the material detail (video, embed, or quiz link). */
+        const renderMaterialDetail = (container) => {
+            const subject = window.appState.subjects.find(s => s.id === window.appState.selectedSubjectId);
+            const chapter = subject?.chapters?.find(c => c.id === window.appState.selectedChapterId);
+            const material = chapter?.materials?.find(m => m.id === window.appState.selectedMaterialId);
+            
+            if (!subject || !chapter || !material) return window.goBackToSubjects();
+
+            container.innerHTML = `
+                <button onclick="window.goBackToChapters()" class="flex items-center text-teal-600 hover:text-teal-800 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                    </svg>
+                    Kembali ke Bab: ${chapter.title}
+                </button>
+                <h2 class="text-3xl font-extrabold text-gray-900 mb-8">${material.title}</h2>
+                <div class="bg-white p-6 rounded-xl shadow-lg">
+                    ${renderMaterialContent(material)}
+                </div>
+            `;
+        };
+
+        const renderMaterialContent = (material) => {
+            if (material.type === 'quiz' && material.url) {
+                // Quiz Link
+                return `
+                    <div class="text-center p-8 border-2 border-dashed border-purple-300 rounded-lg">
+                        <p class="text-xl font-semibold text-gray-700 mb-4">Ayo Kerjakan Kuis Interaktif!</p>
+                        <a href="${material.url}" target="_blank" rel="noopener noreferrer"
+                           class="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition duration-150">
+                           Mulai Kuis Sekarang
+                           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 ml-2" viewBox="0 0 20 20" fill="currentColor">
+                              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V14a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clip-rule="evenodd" />
+                            </svg>
+                        </a>
+                        <p class="mt-4 text-sm text-gray-500">Kuis akan dibuka di tab baru. (URL: ${material.url})</p>
+                    </div>
+                `;
+            } else if (material.type === 'video' && material.url) {
+                // YouTube Video Embed (simple approach)
+                const videoId = extractYouTubeId(material.url);
+                const embedUrl = videoId ? `https://www.youtube.com/embed/${videoId}` : material.url;
+
+                return `
+                    <div class="embed-responsive-container">
+                        <iframe src="${embedUrl}" allowfullscreen 
+                                class="material-iframe shadow-xl"
+                                title="Video Pembelajaran"></iframe>
+                    </div>
+                    <p class="mt-4 text-sm text-gray-500">Sumber: ${material.url}</p>
+                `;
+            } else if (material.type === 'embed' && material.content) {
+                // General Embed/Iframe Code
+                return `
+                    <p class="text-lg font-semibold text-gray-700 mb-3">Konten Terintegrasi 🌐</p>
+                    <div class="embed-responsive-container overflow-hidden rounded-lg border border-gray-200">
+                         <!-- Placeholder/Security Warning -->
+                         <div class="material-placeholder bg-gray-100 flex items-center justify-center">
+                            <p class="text-gray-500 text-center p-4">Embed code dari website lain mungkin tidak ditampilkan karena alasan keamanan di lingkungan sandbox. URL konten: ${material.url || 'Tidak Ada URL'}</p>
+                         </div>
+                         <!-- Attempt to render embed (often blocked by CORS/CSP) -->
+                         <iframe srcdoc="${material.content.replace(/"/g, '&quot;').replace(/'/g, '&#x27;')}" 
+                                 sandbox="allow-scripts allow-same-origin allow-popups" 
+                                 class="material-iframe hidden"
+                                 onload="this.classList.remove('hidden'); this.previousElementSibling.classList.add('hidden');"
+                                 title="Materi Embed"></iframe>
+                    </div>
+                `;
+            }
+            
+            // Default placeholder if URL/Content is missing
+            return `
+                <div class="text-center p-8 border-2 border-dashed border-red-300 bg-red-50 rounded-lg">
+                    <p class="text-xl font-semibold text-red-700 mb-2">Materi Tidak Ditemukan</p>
+                    <p class="text-red-500">Tautan atau konten untuk materi ini belum diatur. Harap hubungi Admin.</p>
+                </div>
+            `;
+        };
+
+        const extractYouTubeId = (url) => {
+            try {
+                const urlObj = new URL(url);
+                if (urlObj.hostname.includes('youtube.com')) {
+                    return urlObj.searchParams.get('v');
+                } else if (urlObj.hostname.includes('youtu.be')) {
+                    return urlObj.pathname.split('/')[1];
+                }
+            } catch (e) {
+                return null;
+            }
+            return null;
+        }
+
+        /** Renders the About tab content. */
+        const renderAbout = (container) => {
+            container.innerHTML = `
+                <h2 class="text-3xl font-extrabold text-teal-600 mb-6 border-b pb-2">Tentang Rumah Belajar Kelas 5</h2>
+                <div class="bg-white p-8 rounded-xl shadow-lg space-y-4">
+                    <p class="text-lg text-gray-700">Selamat datang di **Rumah Belajar Kelas 5**, platform pembelajaran digital yang dirancang khusus untuk mendukung guru dan siswa Sekolah Dasar kelas 5.</p>
+                    <p class="text-gray-600">Website ini bertujuan untuk menyediakan akses mudah ke berbagai sumber belajar, mulai dari video, materi interaktif, hingga kuis, yang disajikan secara terstruktur berdasarkan mata pelajaran dan bab.</p>
+                    <ul class="list-disc list-inside space-y-2 text-gray-600 pl-4">
+                        <li>**Mata Pelajaran:** Akses kurikulum Kelas 5 yang terorganisir.</li>
+                        <li>**Cikgu Tere:** Fitur *live chat* bertenaga AI untuk menjawab pertanyaan siswa secara instan.</li>
+                        <li>**Pengaturan Admin:** Area khusus bagi guru untuk mengelola dan menambahkan konten baru secara *real-time*.</li>
+                    </ul>
+                    <p class="text-gray-700 font-medium pt-4">Kami berkomitmen untuk membuat pengalaman belajar menjadi lebih menyenangkan dan efektif!</p>
+                </div>
+            `;
+        };
+
+        /** Renders the Help tab content. */
+        const renderHelp = (container) => {
+            container.innerHTML = `
+                <h2 class="text-3xl font-extrabold text-teal-600 mb-6 border-b pb-2">Bantuan dan Panduan Penggunaan</h2>
+                <div class="bg-white p-8 rounded-xl shadow-lg space-y-6">
+                    <div class="border-l-4 border-teal-500 pl-4">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Untuk Siswa:</h3>
+                        <ul class="list-disc list-inside space-y-1 text-gray-600">
+                            <li>Pilih tab **Mata Pelajaran** untuk melihat semua materi yang tersedia.</li>
+                            <li>Klik kartu mata pelajaran, lalu pilih Bab yang ingin dipelajari.</li>
+                            <li>Gunakan **Cikgu Tere** (tombol chat biru di sudut kanan bawah) untuk bertanya tentang materi yang belum dipahami.</li>
+                        </ul>
+                    </div>
+                    <div class="border-l-4 border-yellow-500 pl-4">
+                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Untuk Guru (Admin):</h3>
+                        <ul class="list-disc list-inside space-y-1 text-gray-600">
+                            <li>Buka tab **Pengaturan Admin** dan masukkan kata sandi (default: <code class="font-mono bg-gray-100 p-1 rounded">admin123</code>).</li>
+                            <li>Setelah masuk, Anda dapat menambah Mata Pelajaran, Bab, dan Materi baru.</li>
+                            <li>Pastikan URL yang dimasukkan untuk Video/Kuis dapat diakses publik.</li>
+                        </ul>
+                    </div>
+                    <p class="text-sm text-gray-500 pt-4">Jika Anda mengalami masalah teknis, harap hubungi administrator sistem Anda.</p>
+                </div>
+            `;
+        };
+
+        // --- Admin Functions & Rendering ---
+
+        /** Renders the Admin Login form. */
+        const renderAdminLogin = (container) => {
+            container.innerHTML = `
+                <h2 class="text-3xl font-extrabold text-red-600 mb-6 border-b pb-2">Akses Admin</h2>
+                <div class="bg-white p-8 rounded-xl shadow-lg max-w-md mx-auto">
+                    <p class="text-gray-600 mb-4">Area ini terbatas untuk Guru/Admin. Silakan masukkan kata sandi:</p>
+                    <input type="password" id="admin-password" placeholder="Kata Sandi Admin" class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:ring-red-500 focus:border-red-500">
+                    <button onclick="window.handleAdminLogin()" class="w-full bg-red-600 hover:bg-red-700 text-white p-3 rounded-lg font-semibold transition duration-150">
+                        Masuk
+                    </button>
+                    <p id="admin-login-message" class="mt-4 text-center text-red-500 hidden"></p>
+                    <p class="mt-6 text-sm text-gray-500 text-center">Kata sandi default: <code class="font-mono bg-gray-100 p-1 rounded">admin123</code></p>
+                </div>
+            `;
+        };
+
+        /** Handles Admin Login logic. */
+        window.handleAdminLogin = () => {
+            const password = document.getElementById('admin-password').value;
+            const messageEl = document.getElementById('admin-login-message');
+            messageEl.classList.add('hidden');
+
+            if (password === ADMIN_PASSWORD) {
+                window.appState.isAdmin = true;
+                window.renderApp();
+            } else {
+                messageEl.textContent = "Kata sandi salah. Silakan coba lagi.";
+                messageEl.classList.remove('hidden');
+            }
+        };
+
+        /** Renders the full Admin Panel. */
+        const renderAdminPanel = (container) => {
+            container.innerHTML = `
+                <h2 class="text-3xl font-extrabold text-red-600 mb-6 border-b pb-2">Panel Pengaturan Admin</h2>
+                <button onclick="window.logoutAdmin()" class="absolute top-4 right-4 bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded-lg text-sm transition">
+                    Keluar Admin
+                </button>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <!-- Add Subject Form -->
+                    <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg h-full">
+                        <h3 class="text-2xl font-semibold text-gray-800 mb-4">1. Tambah Mata Pelajaran Baru</h3>
+                        <form id="add-subject-form" onsubmit="window.handleAddSubject(event)" class="space-y-4">
+                            <div>
+                                <label for="subject-name" class="block text-sm font-medium text-gray-700">Nama Mata Pelajaran</label>
+                                <input type="text" id="subject-name" required class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
+                            </div>
+                            <div>
+                                <label for="subject-icon" class="block text-sm font-medium text-gray-700">Ikon (Emoji)</label>
+                                <input type="text" id="subject-icon" placeholder="Contoh: 🔢 atau 🌎" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
+                            </div>
+                            <button type="submit" class="w-full bg-teal-600 hover:bg-teal-700 text-white p-3 rounded-lg font-semibold transition duration-150">
+                                Simpan Mata Pelajaran
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Add Chapter/Material Section -->
+                    <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg">
+                        <h3 class="text-2xl font-semibold text-gray-800 mb-4">2. Tambah Bab & Materi</h3>
+                        <div class="space-y-4">
+                            <!-- Subject Selector -->
+                            <div>
+                                <label for="select-subject" class="block text-sm font-medium text-gray-700">Pilih Mata Pelajaran</label>
+                                <select id="select-subject" onchange="window.updateAdminChapterSelector()" class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
+                                    <option value="">-- Pilih Mata Pelajaran --</option>
+                                    ${window.appState.subjects.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+                                </select>
+                            </div>
+
+                            <!-- Add Chapter Form -->
+                            <div id="add-chapter-section" class="border p-4 rounded-lg bg-gray-50 hidden">
+                                <h4 class="text-lg font-semibold mb-3">Tambah Bab Baru</h4>
+                                <input type="text" id="chapter-title" placeholder="Judul Bab (e.g., Bab 1: Penjumlahan Pecahan)" class="w-full p-2 border border-gray-300 rounded-lg mb-3">
+                                <button onclick="window.handleAddChapter()" class="w-full bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg font-semibold transition">
+                                    Tambah Bab
+                                </button>
+                            </div>
+
+                            <!-- Chapter Selector & Material Form -->
+                            <div id="material-management-section" class="border p-4 rounded-lg bg-gray-50 hidden">
+                                <h4 class="text-lg font-semibold mb-3">Tambah Materi ke Bab</h4>
+                                <select id="select-chapter" onchange="window.renderMaterialForm()" class="w-full p-2 border border-gray-300 rounded-lg mb-4">
+                                    <option value="">-- Pilih Bab --</option>
+                                </select>
+                                <form id="add-material-form" onsubmit="window.handleAddMaterial(event)" class="space-y-3 hidden">
+                                    <h5 class="text-base font-medium">Tambah Materi Baru ke Bab <span id="current-chapter-title" class="font-bold"></span></h5>
+                                    <div>
+                                        <label for="material-title" class="block text-sm font-medium text-gray-700">Judul Materi</label>
+                                        <input type="text" id="material-title" required class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
+                                    </div>
+                                    <div>
+                                        <label for="material-type" class="block text-sm font-medium text-gray-700">Jenis Materi</label>
+                                        <select id="material-type" onchange="window.toggleMaterialInputs()" required class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
+                                            <option value="video">Video YouTube</option>
+                                            <option value="embed">Embed/Konten Website Lain</option>
+                                            <option value="quiz">Link Kuis Interaktif</option>
+                                        </select>
+                                    </div>
+                                    <div id="material-url-group">
+                                        <label for="material-url" class="block text-sm font-medium text-gray-700">URL Materi (Video/Kuis)</label>
+                                        <input type="url" id="material-url" placeholder="Contoh: https://www.youtube.com/watch?v=..." class="mt-1 w-full p-2 border border-gray-300 rounded-lg">
+                                    </div>
+                                    <div id="material-content-group" class="hidden">
+                                        <label for="material-content" class="block text-sm font-medium text-gray-700">Kode Embed (HTML Iframe/Script)</label>
+                                        <textarea id="material-content" rows="4" placeholder="Tempel kode embed di sini..." class="mt-1 w-full p-2 border border-gray-300 rounded-lg"></textarea>
+                                    </div>
+                                    <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg font-semibold transition">
+                                        Simpan Materi
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Subject List for Deletion -->
+                <div class="mt-8 bg-white p-6 rounded-xl shadow-lg">
+                    <h3 class="text-2xl font-semibold text-gray-800 mb-4">3. Hapus Mata Pelajaran (Berbahaya)</h3>
+                    <p class="text-sm text-red-500 mb-3">Menghapus mata pelajaran akan menghapus SEMUA Bab dan Materinya!</p>
+                    <div class="space-y-2">
+                        ${window.appState.subjects.map(s => `
+                            <div class="flex justify-between items-center p-3 border rounded-lg">
+                                <span>${s.name} (${(s.chapters || []).length} Bab)</span>
+                                <button onclick="window.handleDeleteSubject('${s.id}', '${s.name}')" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-lg text-sm transition">
+                                    Hapus
+                                </button>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            
+            // Re-render Material Form logic after HTML insertion
+            window.toggleMaterialInputs();
+            window.updateAdminChapterSelector();
+        };
+        
+        window.logoutAdmin = () => {
+            window.appState.isAdmin = false;
+            window.renderApp();
+        };
+
+        window.updateAdminChapterSelector = () => {
+            const subjectId = document.getElementById('select-subject').value;
+            const selectChapterEl = document.getElementById('select-chapter');
+            const addChapterSection = document.getElementById('add-chapter-section');
+            const materialManagementSection = document.getElementById('material-management-section');
+            
+            selectChapterEl.innerHTML = '<option value="">-- Pilih Bab --</option>';
+            document.getElementById('add-material-form').classList.add('hidden');
+
+            if (!subjectId) {
+                addChapterSection.classList.add('hidden');
+                materialManagementSection.classList.add('hidden');
+                return;
+            }
+
+            addChapterSection.classList.remove('hidden');
+            materialManagementSection.classList.remove('hidden');
+
+            const subject = window.appState.subjects.find(s => s.id === subjectId);
+            if (subject && subject.chapters) {
+                subject.chapters.forEach(chapter => {
+                    const option = document.createElement('option');
+                    option.value = chapter.id;
+                    option.textContent = chapter.title;
+                    selectChapterEl.appendChild(option);
+                });
+            }
+        };
+
+        window.renderMaterialForm = () => {
+            const chapterId = document.getElementById('select-chapter').value;
+            const form = document.getElementById('add-material-form');
+            const subjectId = document.getElementById('select-subject').value;
+
+            if (chapterId) {
+                const subject = window.appState.subjects.find(s => s.id === subjectId);
+                const chapter = subject?.chapters?.find(c => c.id === chapterId);
+                document.getElementById('current-chapter-title').textContent = chapter.title;
+                form.classList.remove('hidden');
+            } else {
+                form.classList.add('hidden');
+            }
+        };
+
+        window.toggleMaterialInputs = () => {
+            const type = document.getElementById('material-type')?.value;
+            const urlGroup = document.getElementById('material-url-group');
+            const contentGroup = document.getElementById('material-content-group');
+            const urlInput = document.getElementById('material-url');
+            const contentInput = document.getElementById('material-content');
+
+            if (!urlGroup || !contentGroup) return; // Exit if elements not present
+
+            // Reset requirements
+            urlInput.required = false;
+            contentInput.required = false;
+            
+            // Toggle visibility and requirements
+            if (type === 'embed') {
+                urlGroup.classList.remove('hidden'); // URL for reference
+                contentGroup.classList.remove('hidden');
+                contentInput.required = true;
+            } else if (type === 'video' || type === 'quiz') {
+                urlGroup.classList.remove('hidden');
+                contentGroup.classList.add('hidden');
+                urlInput.required = true;
+            } else {
+                urlGroup.classList.add('hidden');
+                contentGroup.classList.add('hidden');
+            }
+        };
+
+        // --- Firestore Data Functions (Admin Actions) ---
+
+        /** Adds a new subject to Firestore. */
+        window.handleAddSubject = async (event) => {
+            event.preventDefault();
+            const name = document.getElementById('subject-name').value.trim();
+            const icon = document.getElementById('subject-icon').value.trim() || '📚';
+            
+            if (!name || !window.db) return;
+
+            const newSubject = {
+                name: name,
+                icon: icon,
+                chapters: [],
+                createdAt: new Date().toISOString()
+            };
+
+            try {
+                const docRef = window.doc(window.db, SUBJECTS_COLLECTION_PATH(window.appId), crypto.randomUUID());
+                await window.setDoc(docRef, newSubject);
+                document.getElementById('add-subject-form').reset();
+                window.showModal('Berhasil!', `Mata pelajaran **${name}** berhasil ditambahkan.`, 'success');
+            } catch (e) {
+                console.error("Error adding subject: ", e);
+                window.showModal('Gagal!', 'Terjadi kesalahan saat menambahkan mata pelajaran.', 'error');
+            }
+        };
+
+        /** Adds a new chapter to the selected subject in Firestore. */
+        window.handleAddChapter = async () => {
+            const subjectId = document.getElementById('select-subject').value;
+            const chapterTitle = document.getElementById('chapter-title').value.trim();
+
+            if (!subjectId || !chapterTitle || !window.db) return;
+
+            const subjectRef = window.doc(window.db, SUBJECTS_COLLECTION_PATH(window.appId), subjectId);
+            
+            const newChapter = {
+                id: crypto.randomUUID(),
+                title: chapterTitle,
+                materials: [],
+                createdAt: new Date().toISOString()
+            };
+
+            try {
+                await window.updateDoc(subjectRef, {
+                    chapters: window.arrayUnion(newChapter)
+                });
+                document.getElementById('chapter-title').value = '';
+                window.showModal('Berhasil!', `Bab **${chapterTitle}** berhasil ditambahkan.`, 'success');
+                // Force UI update to refresh chapter selector
+                window.updateAdminChapterSelector(); 
+            } catch (e) {
+                console.error("Error adding chapter: ", e);
+                window.showModal('Gagal!', 'Terjadi kesalahan saat menambahkan bab.', 'error');
+            }
+        };
+
+        /** Adds a new material to the selected chapter in Firestore. */
+        window.handleAddMaterial = async (event) => {
+            event.preventDefault();
+            const subjectId = document.getElementById('select-subject').value;
+            const chapterId = document.getElementById('select-chapter').value;
+            const title = document.getElementById('material-title').value.trim();
+            const type = document.getElementById('material-type').value;
+            const url = document.getElementById('material-url').value.trim();
+            const content = document.getElementById('material-content').value.trim();
+
+            if (!subjectId || !chapterId || !title || !window.db) return;
+
+            const subject = window.appState.subjects.find(s => s.id === subjectId);
+            if (!subject) return;
+
+            const chapterIndex = subject.chapters.findIndex(c => c.id === chapterId);
+            if (chapterIndex === -1) return;
+
+            const newMaterial = {
+                id: crypto.randomUUID(),
+                title: title,
+                type: type,
+                url: url,
+                content: content,
+                createdAt: new Date().toISOString()
+            };
+
+            try {
+                // Manually update the chapter array because Firestore doesn't support arrayUnion on nested arrays well for edits/nested additions
+                subject.chapters[chapterIndex].materials.push(newMaterial);
+                
+                const subjectRef = window.doc(window.db, SUBJECTS_COLLECTION_PATH(window.appId), subjectId);
+                await window.updateDoc(subjectRef, { chapters: subject.chapters });
+
+                document.getElementById('add-material-form').reset();
+                window.toggleMaterialInputs();
+                window.showModal('Berhasil!', `Materi **${title}** berhasil ditambahkan.`, 'success');
+
+            } catch (e) {
+                console.error("Error adding material: ", e);
+                window.showModal('Gagal!', 'Terjadi kesalahan saat menambahkan materi.', 'error');
+            }
+        };
+
+        /** Deletes a subject from Firestore. */
+        window.handleDeleteSubject = (subjectId, subjectName) => {
+            window.showConfirmationModal('Hapus Mata Pelajaran', 
+                `Anda yakin ingin menghapus mata pelajaran **${subjectName}**? Tindakan ini tidak dapat dibatalkan.`, 
+                'Hapus Permanen', async () => {
+                
+                if (!window.db) return;
+                try {
+                    const docRef = window.doc(window.db, SUBJECTS_COLLECTION_PATH(window.appId), subjectId);
+                    await window.deleteDoc(docRef);
+                    window.showModal('Berhasil!', `Mata pelajaran **${subjectName}** telah dihapus.`, 'success');
+                } catch (e) {
+                    console.error("Error deleting subject: ", e);
+                    window.showModal('Gagal!', 'Terjadi kesalahan saat menghapus mata pelajaran.', 'error');
+                }
+            });
+        };
+
+        // --- Firestore Real-time Listener ---
+
+        let firestoreListener = null;
+
+        /** Sets up the real-time listener for the subjects collection. */
+        window.setupFirestoreListener = () => { // <-- FIXED: Exposed to window scope
+            if (!window.db || firestoreListener) return;
+
+            const subjectsCollection = window.collection(window.db, SUBJECTS_COLLECTION_PATH(window.appId));
+            const q = window.query(subjectsCollection);
+
+            firestoreListener = window.onSnapshot(q, (snapshot) => {
+                const subjects = [];
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    subjects.push({
+                        id: doc.id,
+                        ...data,
+                        // Ensure chapters is an array and materials are structured
+                        chapters: Array.isArray(data.chapters) ? data.chapters : [] 
+                    });
+                });
+                // Sort subjects alphabetically by name
+                subjects.sort((a, b) => a.name.localeCompare(b.name));
+                
+                window.appState.subjects = subjects;
+                window.renderContent(); // Re-render content to reflect new data
+            }, (error) => {
+                console.error("Firestore Listener Error: ", error);
+                // Optionally show an error modal to the user
+            });
+        };
+
+        // --- Chatbot (Cikgu Tere) Logic (Gemini API) ---
+
+        const CHAT_HISTORY = [];
+        const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=";
+        const GEMINI_SYSTEM_INSTRUCTION = "Anda adalah Cikgu Tere, seorang guru kelas 5 SD yang ramah, sabar, dan sangat bersemangat. Balas semua pertanyaan dalam Bahasa Indonesia. Gunakan bahasa yang mudah dipahami oleh siswa sekolah dasar. Jaga agar jawaban Anda informatif tetapi ringkas. Jika siswa bertanya sesuatu di luar pelajaran kelas 5, arahkan mereka kembali ke topik belajar dengan ramah.";
+
+        const chatToggle = document.getElementById('chat-toggle');
+        const chatModal = document.getElementById('chat-modal');
+        const chatClose = document.getElementById('chat-close');
+        const chatContent = document.getElementById('chat-content');
+        const chatInput = document.getElementById('chat-input');
+        const chatSend = document.getElementById('chat-send');
+
+        chatToggle.addEventListener('click', () => {
+            chatModal.classList.remove('hidden');
+            chatModal.classList.add('flex');
+            chatContent.scrollTop = chatContent.scrollHeight;
+        });
+
+        chatClose.addEventListener('click', () => {
+            chatModal.classList.add('hidden');
+            chatModal.classList.remove('flex');
+        });
+
+        chatSend.addEventListener('click', () => sendMessage());
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        const appendMessage = (sender, text, isWaiting = false) => {
+            const messageEl = document.createElement('div');
+            messageEl.className = sender === 'user' ? 'flex justify-end' : 'flex justify-start';
+            
+            let bubbleClass = sender === 'user' ? 'bg-blue-500 text-white rounded-xl rounded-br-none' : 'bg-gray-200 text-gray-800 rounded-xl rounded-bl-none';
+            if (isWaiting) {
+                bubbleClass = 'bg-gray-300 text-gray-700 rounded-xl rounded-bl-none animate-pulse';
+            }
+
+            messageEl.innerHTML = `
+                <div class="${bubbleClass} p-3 max-w-[80%] shadow-md" id="${isWaiting ? 'waiting-bubble' : ''}">
+                    ${isWaiting ? 'Cikgu Tere sedang berpikir...' : text.replace(/\n/g, '<br>')}
+                </div>
+            `;
+            chatContent.appendChild(messageEl);
+            chatContent.scrollTop = chatContent.scrollHeight;
+        };
+
+        const sendMessage = async () => {
+            const message = chatInput.value.trim();
+            if (!message) return;
+
+            appendMessage('user', message);
+            CHAT_HISTORY.push({ role: "user", parts: [{ text: message }] });
+
+            chatInput.value = '';
+            chatSend.disabled = true;
+
+            // Show waiting message
+            appendMessage('bot', '', true);
+
+            try {
+                const responseText = await callGeminiAPI(message);
+                
+                // Remove waiting message
+                const waitingBubble = document.getElementById('waiting-bubble');
+                if (waitingBubble) {
+                    waitingBubble.textContent = responseText;
+                    waitingBubble.classList.remove('bg-gray-300', 'animate-pulse');
+                    waitingBubble.classList.add('bg-gray-200', 'text-gray-800');
+                    waitingBubble.removeAttribute('id');
+                } else {
+                     // Fallback if somehow waiting bubble was missed
+                     appendMessage('bot', responseText);
+                }
+                
+                CHAT_HISTORY.push({ role: "model", parts: [{ text: responseText }] });
+                
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                const waitingBubble = document.getElementById('waiting-bubble');
+                 if (waitingBubble) {
+                    waitingBubble.textContent = "Maaf, Cikgu Tere sedang sibuk. Coba lagi sebentar ya!";
+                    waitingBubble.classList.remove('bg-gray-300', 'animate-pulse');
+                    waitingBubble.classList.add('bg-red-200', 'text-red-800');
+                    waitingBubble.removeAttribute('id');
+                } else {
+                    appendMessage('bot', "Maaf, Cikgu Tere sedang sibuk. Coba lagi sebentar ya!");
+                }
+            } finally {
+                chatSend.disabled = false;
+                chatContent.scrollTop = chatContent.scrollHeight;
+            }
+        };
+
+        const callGeminiAPI = async (userQuery, retryCount = 0) => {
+            const apiKey = ""; 
+            const apiUrl = GEMINI_API_URL + apiKey;
+            
+            // Limit history to last 10 messages for context
+            const contents = CHAT_HISTORY.slice(-10);
+
+            const payload = {
+                contents: contents,
+                systemInstruction: {
+                    parts: [{ text: GEMINI_SYSTEM_INSTRUCTION }]
+                },
+                tools: [{ "google_search": {} }],
+            };
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.status === 429 && retryCount < 3) {
+                    const delay = Math.pow(2, retryCount) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return callGeminiAPI(userQuery, retryCount + 1);
+                }
+
+                if (!response.ok) {
+                    throw new Error(`API call failed with status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                return result.candidates?.[0]?.content?.parts?.[0]?.text || "Maaf, Cikgu Tere tidak dapat memberikan jawaban saat ini.";
+
+            } catch (error) {
+                if (retryCount >= 3) {
+                    throw new Error("Failed after multiple retries.");
+                }
+                throw error;
+            }
+        };
+        
+        // --- Generic Modal Functions ---
+
+        /** Shows a simple success/error/info modal. */
+        window.showModal = (title, message, type) => {
+            const modal = document.getElementById('generic-modal');
+            const content = document.getElementById('modal-content');
+            
+            let color = {
+                success: 'text-green-600 border-green-500', 
+                error: 'text-red-600 border-red-500',
+                info: 'text-blue-600 border-blue-500'
+            }[type] || 'text-gray-800 border-gray-500';
+
+            content.innerHTML = `
+                <h3 class="text-xl font-bold mb-3 ${color} border-b pb-2">${title}</h3>
+                <p class="text-gray-600 mb-4">${message}</p>
+                <button onclick="window.closeModal()" class="w-full bg-gray-500 hover:bg-gray-600 text-white p-2 rounded-lg transition">Tutup</button>
+            `;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        };
+
+        /** Shows a confirmation modal with a callback for action. */
+        window.showConfirmationModal = (title, message, confirmText, callback) => {
+            const modal = document.getElementById('generic-modal');
+            const content = document.getElementById('modal-content');
+            
+            content.innerHTML = `
+                <h3 class="text-xl font-bold mb-3 text-red-600 border-b pb-2">Konfirmasi ${title}</h3>
+                <p class="text-gray-600 mb-4">${message}</p>
+                <div class="flex space-x-3">
+                    <button onclick="window.closeModal()" class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 p-2 rounded-lg transition">Batal</button>
+                    <button id="confirm-action-btn" class="flex-1 bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition">${confirmText}</button>
+                </div>
+            `;
+            
+            document.getElementById('confirm-action-btn').onclick = () => {
+                window.closeModal();
+                callback();
+            };
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        };
+
+        window.closeModal = () => {
+            document.getElementById('generic-modal').classList.add('hidden');
+            document.getElementById('generic-modal').classList.remove('flex');
+        };
+
+        // Initialize App on load (after Firebase setup completes)
+        window.onload = () => {
+            if (typeof window.renderApp === 'function') {
+                // If Firebase setup is still running, it will call renderApp
+                // If Firebase failed/missing, we call it here as fallback
+                if (!window.db) {
+                     window.renderApp();
+                }
+            }
+        };
+
+    </script>
+</body>
+</html>
+
