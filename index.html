@@ -61,7 +61,7 @@
         import { getFirestore, collection, doc, setDoc, query, onSnapshot, getDoc, updateDoc, arrayUnion, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // EXPOSE FIRESTORE FUNCTIONS TO GLOBAL SCOPE (FIX: ReferenceError: collection is not defined)
+        // EXPOSE FIRESTORE FUNCTIONS TO GLOBAL SCOPE
         window.collection = collection;
         window.doc = doc;
         window.setDoc = setDoc;
@@ -82,17 +82,37 @@
         window.currentUserId = null;
         window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        // --- START: KONFIGURASI PENTING UNTUK HOSTING EKSTERNAL (Harap Ganti!) ---
+        // Jika Anda menghosting website ini di luar lingkungan Canvas, 
+        // pastikan Anda memasukkan konfigurasi Firebase project Anda di sini.
+        const HARDCODED_FIREBASE_CONFIG = {
+            apiKey: "AIzaSyD8mRXy6oyNpHQ6uJ_xX8YS8spWYU0wXTg", // <-- PENTING! Ganti ini.
+            authDomain: "rumah-belajar-kls-5.firebaseapp.com",
+            projectId: "rumah-belajar-kls-5", // <-- PENTING! Ganti ini.
+            storageBucket: "rumah-belajar-kls-5.firebasestorage.app",
+            messagingSenderId: "69406397949",
+            appId: "1:69406397949:web:3d0edd30e5bf273b623594"
+        };
+        // --- END: KONFIGURASI PENTING UNTUK HOSTING EKSTERNAL ---
+
+        // Prioritaskan config dari Canvas, jika tidak ada gunakan config hardcoded
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+                            ? JSON.parse(__firebase_config) 
+                            : HARDCODED_FIREBASE_CONFIG;
+                            
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        // Initialize Firebase
-        if (Object.keys(firebaseConfig).length > 0) {
+        // Inisialisasi Firebase hanya jika apiKey valid (bukan placeholder)
+        const isConfigValid = firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== "GANTI_DENGAN_API_KEY_ANDA";
+
+        if (isConfigValid) {
             window.firebaseApp = initializeApp(firebaseConfig);
             window.db = getFirestore(window.firebaseApp);
             window.auth = getAuth(window.firebaseApp);
         } else {
-            console.error("Firebase config is missing. Data persistence will not work.");
+            console.error("Firebase config is missing or using placeholder. Data persistence will not work.");
         }
+
 
         // Handle Authentication
         if (window.auth) {
@@ -110,7 +130,7 @@
                     } catch (error) {
                         console.error("Firebase Auth Error:", error);
                         // Fallback to random ID if authentication fails
-                        window.currentUserId = 'guest-' + crypto.randomUUID();
+                        window.currentUserId = 'guest-' + window.generateId(); // Use robust ID generator
                     }
                 }
                 document.getElementById('loading-overlay').classList.add('hidden');
@@ -119,7 +139,7 @@
             });
         } else {
             // Run without Firebase if config is missing
-            window.currentUserId = 'guest-' + crypto.randomUUID();
+            window.currentUserId = 'guest-' + window.generateId(); // Use robust ID generator
             document.getElementById('loading-overlay').classList.add('hidden');
             document.getElementById('app-container').classList.remove('hidden');
             window.renderApp();
@@ -214,6 +234,16 @@
     </div>
 
     <script>
+        // --- ID Generator Function (FIX for external hosting) ---
+        /** Generates a unique ID using crypto.randomUUID with a fallback for restricted environments. */
+        window.generateId = () => {
+            if (typeof window.crypto !== 'undefined' && typeof window.crypto.randomUUID === 'function') {
+                return window.crypto.randomUUID();
+            }
+            // Fallback: highly robust timestamp-based random string
+            return 'id-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
+        };
+        
         // --- Global State Management ---
         window.appState = {
             activeTab: 'mapel', // 'mapel', 'tentang', 'admin', 'bantuan'
@@ -239,15 +269,15 @@
         /** Renders the main application based on the current state. */
         window.renderApp = () => {
             window.renderTabs();
-            window.renderContent(); // <-- FIXED: Calling from window scope
+            window.renderContent(); 
             // Re-attach Firestore listener if DB is ready
             if (window.db && !window.firestoreListener) {
-                window.setupFirestoreListener(); // <-- FIXED: Calling from window scope
+                window.setupFirestoreListener(); 
             }
         };
 
         /** Renders the tab navigation bar. */
-        window.renderTabs = () => { // <-- FIXED: Exposed to window scope
+        window.renderTabs = () => { 
             const tabsContainer = document.getElementById('tabs');
             const tabs = [
                 { id: 'mapel', label: 'Mata Pelajaran' },
@@ -266,7 +296,7 @@
         };
 
         /** Renders the content of the active tab. */
-        window.renderContent = () => { // <-- FIXED: Exposed to window scope
+        window.renderContent = () => { 
             const container = document.getElementById('content-container');
             container.innerHTML = '';
             
@@ -796,7 +826,11 @@
             const name = document.getElementById('subject-name').value.trim();
             const icon = document.getElementById('subject-icon').value.trim() || '📚';
             
-            if (!name || !window.db) return;
+            if (!name || !window.db) {
+                // Tambahkan pesan error jika DB tidak terinisialisasi
+                window.showModal('Gagal!', 'Aksi dibatalkan. Koneksi ke database Firebase belum diinisialisasi. Cek kembali konfigurasi API Key Anda.', 'error');
+                return;
+            }
 
             const newSubject = {
                 name: name,
@@ -806,7 +840,8 @@
             };
 
             try {
-                const docRef = window.doc(window.db, SUBJECTS_COLLECTION_PATH(window.appId), crypto.randomUUID());
+                // FIX: Use generateId() for reliable ID generation
+                const docRef = window.doc(window.db, SUBJECTS_COLLECTION_PATH(window.appId), window.generateId());
                 await window.setDoc(docRef, newSubject);
                 document.getElementById('add-subject-form').reset();
                 window.showModal('Berhasil!', `Mata pelajaran **${name}** berhasil ditambahkan.`, 'success');
@@ -821,12 +856,15 @@
             const subjectId = document.getElementById('select-subject').value;
             const chapterTitle = document.getElementById('chapter-title').value.trim();
 
-            if (!subjectId || !chapterTitle || !window.db) return;
+            if (!subjectId || !chapterTitle || !window.db) {
+                window.showModal('Gagal!', 'Aksi dibatalkan. Pastikan Mata Pelajaran sudah dipilih dan koneksi Firebase aktif.', 'error');
+                return;
+            }
 
             const subjectRef = window.doc(window.db, SUBJECTS_COLLECTION_PATH(window.appId), subjectId);
             
             const newChapter = {
-                id: crypto.randomUUID(),
+                id: window.generateId(), // FIX: Use generateId()
                 title: chapterTitle,
                 materials: [],
                 createdAt: new Date().toISOString()
@@ -856,7 +894,10 @@
             const url = document.getElementById('material-url').value.trim();
             const content = document.getElementById('material-content').value.trim();
 
-            if (!subjectId || !chapterId || !title || !window.db) return;
+            if (!subjectId || !chapterId || !title || !window.db) {
+                window.showModal('Gagal!', 'Aksi dibatalkan. Pastikan Bab sudah dipilih dan koneksi Firebase aktif.', 'error');
+                return;
+            }
 
             const subject = window.appState.subjects.find(s => s.id === subjectId);
             if (!subject) return;
@@ -865,7 +906,7 @@
             if (chapterIndex === -1) return;
 
             const newMaterial = {
-                id: crypto.randomUUID(),
+                id: window.generateId(), // FIX: Use generateId()
                 title: title,
                 type: type,
                 url: url,
@@ -913,7 +954,7 @@
         let firestoreListener = null;
 
         /** Sets up the real-time listener for the subjects collection. */
-        window.setupFirestoreListener = () => { // <-- FIXED: Exposed to window scope
+        window.setupFirestoreListener = () => { 
             if (!window.db || firestoreListener) return;
 
             const subjectsCollection = window.collection(window.db, SUBJECTS_COLLECTION_PATH(window.appId));
@@ -1145,4 +1186,3 @@
     </script>
 </body>
 </html>
-
