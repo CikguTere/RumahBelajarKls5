@@ -86,7 +86,7 @@
         // Jika Anda menghosting website ini di luar lingkungan Canvas, 
         // pastikan Anda memasukkan konfigurasi Firebase project Anda di sini.
         const HARDCODED_FIREBASE_CONFIG = {
-            apiKey: "AIzaSyD8mRXy6oyNpHQ6uJ_xX8YS8spWYU0wXTg", // <-- PENTING! Ganti ini.
+            apiKey: "AIzaSyDF_ZjkrlI2Q_sg7mCMODi969sADzEqdh0", // <-- PENTING! Ganti ini.
             authDomain: "rumah-belajar-kls-5.firebaseapp.com",
             projectId: "rumah-belajar-kls-5", // <-- PENTING! Ganti ini.
             storageBucket: "rumah-belajar-kls-5.firebasestorage.app",
@@ -112,6 +112,13 @@
         } else {
             console.error("Firebase config is missing or using placeholder. Data persistence will not work.");
         }
+        
+        // Expose the determined API Key (either Canvas or Hardcoded) globally for the chat function
+        window.FIREBASE_API_KEY = isConfigValid ? firebaseConfig.apiKey : "";
+
+        // PENTING: KUNCI KHUSUS CHATBOT (GEMINI API)
+        // Kunci ini harus memiliki izin untuk Generative Language API.
+        window.GEMINI_API_KEY_CHAT = "AIzaSyDF_ZjkrlI2Q_sg7mCMODi969sADzEqdh0";
 
 
         // Handle Authentication
@@ -734,6 +741,36 @@
                         `).join('')}
                     </div>
                 </div>
+                
+                <!-- NEW SECTION: FIRESTORE SECURITY RULES INSTRUCTION -->
+                <div class="mt-8 bg-yellow-50 p-6 rounded-xl shadow-lg border-l-4 border-yellow-500">
+                    <h3 class="text-2xl font-extrabold text-red-700 mb-4">4. FIX ERROR: PERMISSION DENIED (Wajib di Firebase Console)</h3>
+                    <p class="text-gray-700 mb-4">Jika Anda mendapat pesan **"Kode Error: permission-denied"** saat menyimpan data, Anda harus menyalin dan memublikasikan Aturan Keamanan Firestore berikut di Konsol Firebase Anda:</p>
+                    
+                    <ol class="list-decimal list-inside space-y-2 text-gray-600 mb-4 pl-4">
+                        <li>Buka **Firebase Console** > **Firestore Database** > Tab **Rules**.</li>
+                        <li>Ganti semua konten di editor aturan dengan kode di bawah ini.</li>
+                        <li>Klik **Publish** (Publikasikan).</li>
+                    </ol>
+
+                    <pre class="bg-gray-800 text-white p-4 rounded-lg overflow-x-auto text-sm font-mono whitespace-pre-wrap select-all"><code>rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ATURAN KRITIS: Izinkan Baca dan Tulis untuk pengguna terotentikasi (anonim termasuk).
+    match /artifacts/{appId}/public/data/subjects/{subjectId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Aturan untuk data pribadi (jika ada)
+    match /artifacts/{appId}/users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}</code></pre>
+
+                    <p class="mt-4 text-red-600 font-semibold">Pastikan juga status **Anonymous Sign-in** diaktifkan di bagian Authentication Firebase.</p>
+                </div>
+                <!-- END NEW SECTION -->
             `;
             
             // Re-render Material Form logic after HTML insertion
@@ -827,7 +864,6 @@
             const icon = document.getElementById('subject-icon').value.trim() || '📚';
             
             if (!name || !window.db) {
-                // Tambahkan pesan error jika DB tidak terinisialisasi
                 window.showModal('Gagal!', 'Aksi dibatalkan. Koneksi ke database Firebase belum diinisialisasi. Cek kembali konfigurasi API Key Anda.', 'error');
                 return;
             }
@@ -847,7 +883,8 @@
                 window.showModal('Berhasil!', `Mata pelajaran **${name}** berhasil ditambahkan.`, 'success');
             } catch (e) {
                 console.error("Error adding subject: ", e);
-                window.showModal('Gagal!', 'Terjadi kesalahan saat menambahkan mata pelajaran.', 'error');
+                const errorMessage = e.code ? `Kode Error: ${e.code}. Cek Aturan Keamanan Firestore dan status Anonymous Sign-in.` : 'Terjadi kesalahan tak terduga.';
+                window.showModal('Gagal Menyimpan!', `${errorMessage}`, 'error');
             }
         };
 
@@ -880,7 +917,8 @@
                 window.updateAdminChapterSelector(); 
             } catch (e) {
                 console.error("Error adding chapter: ", e);
-                window.showModal('Gagal!', 'Terjadi kesalahan saat menambahkan bab.', 'error');
+                const errorMessage = e.code ? `Kode Error: ${e.code}. Cek Aturan Keamanan Firestore dan status Anonymous Sign-in.` : 'Terjadi kesalahan tak terduga.';
+                window.showModal('Gagal Menyimpan!', `${errorMessage}`, 'error');
             }
         };
 
@@ -927,7 +965,8 @@
 
             } catch (e) {
                 console.error("Error adding material: ", e);
-                window.showModal('Gagal!', 'Terjadi kesalahan saat menambahkan materi.', 'error');
+                const errorMessage = e.code ? `Kode Error: ${e.code}. Cek Aturan Keamanan Firestore dan status Anonymous Sign-in.` : 'Terjadi kesalahan tak terduga.';
+                window.showModal('Gagal Menyimpan!', `${errorMessage}`, 'error');
             }
         };
 
@@ -944,7 +983,8 @@
                     window.showModal('Berhasil!', `Mata pelajaran **${subjectName}** telah dihapus.`, 'success');
                 } catch (e) {
                     console.error("Error deleting subject: ", e);
-                    window.showModal('Gagal!', 'Terjadi kesalahan saat menghapus mata pelajaran.', 'error');
+                    const errorMessage = e.code ? `Kode Error: ${e.code}. Cek Aturan Keamanan Firestore.` : 'Terjadi kesalahan tak terduga.';
+                    window.showModal('Gagal Menghapus!', `${errorMessage}`, 'error');
                 }
             });
         };
@@ -1036,6 +1076,17 @@
             const message = chatInput.value.trim();
             if (!message) return;
 
+            // Determine which API key to use (dedicated key is mandatory)
+            const apiKeyToUse = window.GEMINI_API_KEY_CHAT;
+
+            // --- FIX: Strict check for dedicated Gemini Key ---
+            if (!apiKeyToUse || apiKeyToUse === "GANTI_DENGAN_KUNCI_GEMINI_ANDA") {
+                window.showModal('Chat Gagal!', 'Cikgu Tere tidak dapat dihubungi. Anda HARUS mengganti placeholder "GANTI_DENGAN_KUNCI_GEMINI_ANDA" dengan Kunci Gemini API yang valid dari Google AI Studio untuk mengaktifkan fitur ini.', 'error');
+                return;
+            }
+            // --- END FIX ---
+
+
             appendMessage('user', message);
             CHAT_HISTORY.push({ role: "user", parts: [{ text: message }] });
 
@@ -1046,7 +1097,7 @@
             appendMessage('bot', '', true);
 
             try {
-                const responseText = await callGeminiAPI(message);
+                const responseText = await callGeminiAPI(message, apiKeyToUse);
                 
                 // Remove waiting message
                 const waitingBubble = document.getElementById('waiting-bubble');
@@ -1064,9 +1115,20 @@
                 
             } catch (error) {
                 console.error("Gemini API Error:", error);
+                
+                // --- FIX: Explicit 403 instruction in modal ---
+                let modalMessage = "Maaf, Cikgu Tere sedang sibuk atau mengalami kendala koneksi. Coba lagi sebentar ya!";
+                if (error.message.includes('403') || error.message.includes('PERMISSION_DENIED')) {
+                    modalMessage = "Akses AI Ditolak (403). Kunci Gemini API yang Anda gunakan tidak memiliki izin. Mohon pastikan Kunci yang Anda masukkan sudah benar dan diaktifkan untuk Generative Language API di konsol Google Anda.";
+                }
+                
+                // Show failure to user using modal
+                window.showModal('Chat Gagal!', modalMessage, 'error');
+                // --- END FIX ---
+
                 const waitingBubble = document.getElementById('waiting-bubble');
                  if (waitingBubble) {
-                    waitingBubble.textContent = "Maaf, Cikgu Tere sedang sibuk. Coba lagi sebentar ya!";
+                    waitingBubble.textContent = "Maaf, Cikgu Tere sedang sibuk atau mengalami kendala koneksi. Coba lagi sebentar ya!";
                     waitingBubble.classList.remove('bg-gray-300', 'animate-pulse');
                     waitingBubble.classList.add('bg-red-200', 'text-red-800');
                     waitingBubble.removeAttribute('id');
@@ -1079,8 +1141,7 @@
             }
         };
 
-        const callGeminiAPI = async (userQuery, retryCount = 0) => {
-            const apiKey = ""; 
+        const callGeminiAPI = async (userQuery, apiKey, retryCount = 0) => {
             const apiUrl = GEMINI_API_URL + apiKey;
             
             // Limit history to last 10 messages for context
@@ -1104,11 +1165,13 @@
                 if (response.status === 429 && retryCount < 3) {
                     const delay = Math.pow(2, retryCount) * 1000;
                     await new Promise(resolve => setTimeout(resolve, delay));
-                    return callGeminiAPI(userQuery, retryCount + 1);
+                    return callGeminiAPI(userQuery, apiKey, retryCount + 1);
                 }
 
                 if (!response.ok) {
-                    throw new Error(`API call failed with status: ${response.status}`);
+                    const errorJson = await response.json();
+                    console.error("API Response Error:", errorJson);
+                    throw new Error(`API call failed with status: ${response.status} - ${errorJson.error?.message || 'Unknown error'}`);
                 }
 
                 const result = await response.json();
