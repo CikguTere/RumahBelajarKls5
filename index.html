@@ -144,16 +144,31 @@
                 
                 onAuthStateChanged(window.auth, (user) => {
                     window.currentUser = user;
-                    if (user) window.startDataListeners();
+                    if (user) {
+                        console.log("Authenticated as:", user.uid);
+                        window.startDataListeners();
+                    }
                     window.hideLoading();
                 });
 
                 const initAuth = async () => {
-                    if (initialAuthToken) await signInWithCustomToken(window.auth, initialAuthToken);
-                    else await signInAnonymously(window.auth);
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(window.auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(window.auth);
+                        }
+                    } catch (e) {
+                        console.error("Auth Error:", e);
+                        window.showNotify("Koneksi gagal. Periksa sinyal Anda.");
+                        window.hideLoading();
+                    }
                 };
                 initAuth();
-            } catch (err) { window.hideLoading(); }
+            } catch (err) { 
+                console.error("Firebase Init Error:", err);
+                window.hideLoading(); 
+            }
         }
     </script>
 </head>
@@ -192,7 +207,7 @@
             studentProfile: JSON.parse(localStorage.getItem('student_profile')) || null,
             isAdminLoggedIn: sessionStorage.getItem('admin_session') === 'active',
             viewingSubject: null,
-            adminView: 'attendance' // 'attendance' or 'manage'
+            adminView: 'attendance'
         };
 
         window.startDataListeners = () => {
@@ -203,7 +218,7 @@
             window.onSnapshot(qSub, (snap) => {
                 window.appState.subjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.renderApp();
-            });
+            }, (err) => console.error("Firestore Subjects Error:", err));
 
             // Listen Attendance
             const qAtt = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
@@ -211,7 +226,7 @@
                 window.appState.attendance = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.appState.attendance.sort((a,b) => (b.serverTime?.toMillis() || 0) - (a.serverTime?.toMillis() || 0));
                 window.renderApp();
-            });
+            }, (err) => console.error("Firestore Attendance Error:", err));
         };
 
         window.renderApp = () => {
@@ -282,27 +297,53 @@
                             <option value="5B">Kelas 5B</option>
                             <option value="5C">Kelas 5C</option>
                         </select>
-                        <button onclick="window.saveProfile()" class="w-full btn-primary text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg">Masuk Kelas</button>
+                        <button id="btn-absen" onclick="window.saveProfile()" class="w-full btn-primary text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg">Masuk Kelas</button>
                     </div>
                 </div>`;
             }
         }
 
         window.saveProfile = async () => {
-            const nama = document.getElementById('s-nama').value;
-            const sekolah = document.getElementById('s-sekolah').value;
+            const nama = document.getElementById('s-nama').value.trim();
+            const sekolah = document.getElementById('s-sekolah').value.trim();
             const kelas = document.getElementById('s-kelas').value;
-            if (!nama || !sekolah) return window.showNotify("Isi data dulu!");
+            const btn = document.getElementById('btn-absen');
+
+            if (!nama || !sekolah) return window.showNotify("Harap isi nama dan sekolah!");
+            
+            // Cek apakah Firebase sudah siap
+            if (!window.currentUser || !window.db) {
+                return window.showNotify("Masih menghubungkan ke server, coba lagi sebentar...");
+            }
 
             try {
-                const profile = { nama, sekolah, kelas, timestamp: new Date().toISOString() };
+                btn.disabled = true;
+                btn.innerText = "MENGIRIM...";
+                
+                const profile = { 
+                    nama, 
+                    sekolah, 
+                    kelas, 
+                    uid: window.currentUser.uid,
+                    timestamp: new Date().toISOString() 
+                };
+
+                // Path sesuai MANDATORY RULE 1
                 await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance'), { 
-                    ...profile, serverTime: window.serverTimestamp() 
+                    ...profile, 
+                    serverTime: window.serverTimestamp() 
                 });
+
                 localStorage.setItem('student_profile', JSON.stringify(profile));
                 window.appState.studentProfile = profile;
+                window.showNotify("Berhasil Absen!");
                 window.renderApp();
-            } catch(e) { window.showNotify("Gagal terhubung!"); }
+            } catch(e) { 
+                console.error("Save Error:", e);
+                window.showNotify("Gagal terhubung ke database. Coba lagi."); 
+                btn.disabled = false;
+                btn.innerText = "MASUK KELAS";
+            }
         };
 
         function renderMapel(container) {
@@ -347,8 +388,6 @@
             window.renderApp();
         };
 
-        // --- ADMIN / TEACHER DASHBOARD ---
-
         function renderAdmin(container) {
             if (!window.appState.isAdminLoggedIn) {
                 container.innerHTML = `
@@ -356,57 +395,39 @@
                     <h2 class="text-xl font-black mb-6">Login Guru</h2>
                     <input id="admin-pw" type="password" class="input-elegant w-full p-4 rounded-xl text-center mb-4" placeholder="Sandi">
                     <button onclick="window.checkAdmin()" class="w-full btn-primary text-white py-4 rounded-xl font-bold">Masuk</button>
-                    <p class="text-[10px] text-slate-300 mt-4 uppercase font-bold tracking-widest">Akses Terbatas</p>
                 </div>`;
                 return;
             }
 
             container.innerHTML = `
             <div class="space-y-6">
-                <!-- Admin Header & Switcher -->
-                <div class="flex flex-col sm:flex-row justify-between items-center glass p-6 rounded-3xl gap-4 shadow-sm border border-slate-100">
+                <div class="flex flex-col sm:flex-row justify-between items-center glass p-6 rounded-3xl gap-4 shadow-sm">
                     <div class="flex gap-2 bg-slate-100 p-1.5 rounded-2xl">
                         <button onclick="window.setAdminView('attendance')" class="px-6 py-2.5 rounded-xl font-black text-xs tracking-widest uppercase transition-all ${window.appState.adminView === 'attendance' ? 'bg-white shadow-md text-emerald-600' : 'text-slate-400'}">Data Absensi</button>
                         <button onclick="window.setAdminView('manage')" class="px-6 py-2.5 rounded-xl font-black text-xs tracking-widest uppercase transition-all ${window.appState.adminView === 'manage' ? 'bg-white shadow-md text-emerald-600' : 'text-slate-400'}">Kelola Pelajaran</button>
                     </div>
-                    <div class="flex items-center gap-4">
-                        <span class="text-xs font-bold text-slate-400">Status: <span class="text-emerald-500">Guru Aktif</span></span>
-                        <button onclick="window.adminLogout()" class="bg-red-50 text-red-500 px-4 py-2 rounded-xl font-bold text-xs hover:bg-red-100 transition-colors">Logout</button>
-                    </div>
+                    <button onclick="window.adminLogout()" class="bg-red-50 text-red-500 px-4 py-2 rounded-xl font-bold text-xs hover:bg-red-100 transition-colors">Logout</button>
                 </div>
-
-                <!-- Admin Body -->
                 ${window.appState.adminView === 'attendance' ? renderAdminAttendance() : renderAdminManage()}
             </div>`;
         }
 
         function renderAdminAttendance() {
             return `
-            <div class="glass p-8 rounded-[2.5rem] card-shadow">
-                <div class="flex justify-between items-center mb-6">
-                    <h3 class="font-black text-xl">Daftar Kehadiran Siswa</h3>
-                    <div class="bg-emerald-100 text-emerald-600 px-4 py-1.5 rounded-full text-xs font-black">${window.appState.attendance.length} Siswa Terdaftar</div>
-                </div>
+            <div class="glass p-8 rounded-[2.5rem] card-shadow overflow-hidden">
+                <h3 class="font-black text-xl mb-6">Daftar Kehadiran (${window.appState.attendance.length})</h3>
                 <div class="table-container custom-scroll">
                     <table class="w-full">
-                        <thead>
-                            <tr>
-                                <th>Waktu Masuk</th>
-                                <th>Nama Lengkap</th>
-                                <th>Kelas</th>
-                                <th>Sekolah</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Waktu</th><th>Nama</th><th>Kelas</th><th>Sekolah</th></tr></thead>
                         <tbody>
                             ${window.appState.attendance.map(a => `
-                                <tr class="hover:bg-slate-50 transition-colors">
-                                    <td class="text-[11px] text-slate-400 font-medium">${a.serverTime?.toDate().toLocaleString('id-ID') || '-'}</td>
+                                <tr>
+                                    <td class="text-[10px] text-slate-400">${a.serverTime?.toDate().toLocaleString('id-ID') || '-'}</td>
                                     <td class="font-black text-slate-800">${a.nama}</td>
                                     <td class="font-bold text-emerald-600 uppercase text-xs">${a.kelas || '-'}</td>
-                                    <td class="text-slate-500 text-sm font-medium">${a.sekolah}</td>
+                                    <td class="text-slate-500 text-sm">${a.sekolah}</td>
                                 </tr>
                             `).join('')}
-                            ${window.appState.attendance.length === 0 ? '<tr><td colspan="4" class="text-center py-20 text-slate-400 italic">Belum ada siswa yang absen hari ini.</td></tr>' : ''}
                         </tbody>
                     </table>
                 </div>
@@ -415,128 +436,84 @@
 
         function renderAdminManage() {
             return `
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                <!-- Panel 1: Form Tambah Mapel -->
-                <div class="glass p-8 rounded-[2.5rem] card-shadow border border-slate-100">
-                    <h3 class="font-black text-lg mb-6 flex items-center gap-2">
-                        <span class="w-8 h-8 bg-emerald-100 flex items-center justify-center rounded-lg text-lg">➕</span>
-                        Mapel Baru
-                    </h3>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div class="glass p-8 rounded-[2.5rem] card-shadow">
+                    <h3 class="font-black text-lg mb-6">Mapel Baru</h3>
                     <div class="space-y-4">
-                        <div>
-                            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Nama Mata Pelajaran</label>
-                            <input id="new-mapel-name" class="input-elegant w-full p-4 rounded-xl" placeholder="Contoh: Matematika">
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Ikon (Emoji)</label>
-                            <input id="new-mapel-icon" class="input-elegant w-full p-4 rounded-xl" placeholder="Contoh: 📐">
-                        </div>
-                        <button onclick="window.addMapel()" class="w-full btn-primary text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg shadow-slate-200">Tambahkan Mapel</button>
+                        <input id="new-mapel-name" class="input-elegant w-full p-4 rounded-xl" placeholder="Nama Pelajaran">
+                        <input id="new-mapel-icon" class="input-elegant w-full p-4 rounded-xl" placeholder="Ikon Emoji">
+                        <button onclick="window.addMapel()" class="w-full btn-primary text-white py-4 rounded-xl font-black">TAMBAH MAPEL</button>
                     </div>
                 </div>
-
-                <!-- Panel 2: Daftar Mapel & Editor Detail -->
                 <div class="lg:col-span-2 space-y-6">
                     ${window.appState.subjects.map(s => `
-                        <div class="glass p-8 rounded-[2.5rem] card-shadow border border-slate-100 relative group">
-                            <div class="flex justify-between items-start mb-6">
+                        <div class="glass p-8 rounded-[2.5rem] card-shadow">
+                            <div class="flex justify-between items-center mb-6">
                                 <div class="flex items-center gap-4">
-                                    <div class="text-4xl">${s.icon || '📚'}</div>
-                                    <div>
-                                        <h4 class="font-black text-xl text-slate-900">${s.name}</h4>
-                                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">${(s.chapters || []).length} Bab Tersedia</p>
-                                    </div>
+                                    <span class="text-4xl">${s.icon}</span>
+                                    <h4 class="font-black text-xl">${s.name}</h4>
                                 </div>
-                                <button onclick="window.deleteMapel('${s.id}')" class="p-2 text-red-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                </button>
+                                <button onclick="window.deleteMapel('${s.id}')" class="text-red-400">Hapus</button>
                             </div>
-                            
-                            <!-- Section: BAB Editor -->
-                            <div class="bg-slate-50/50 p-6 rounded-3xl mb-6">
-                                <h5 class="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4">Materi Per Bab</h5>
-                                
-                                <div class="space-y-6">
-                                    ${(s.chapters || []).map((ch, chIdx) => `
-                                        <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-                                            <div class="flex justify-between items-center mb-4 pb-2 border-b border-slate-50">
-                                                <span class="font-black text-slate-800 text-sm">BAB ${chIdx+1}: ${ch.title}</span>
-                                                <button onclick="window.removeBab('${s.id}', ${chIdx})" class="text-[10px] text-red-400 font-bold hover:underline">Hapus BAB</button>
-                                            </div>
-                                            
-                                            <!-- Sub-materi List -->
-                                            <div class="space-y-2 mb-4">
-                                                ${(ch.topics || []).map((t, tIdx) => `
-                                                    <div class="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-lg group/topic">
-                                                        <span class="text-xs font-bold text-slate-600 truncate mr-2">${t.title}</span>
-                                                        <button onclick="window.removeTopic('${s.id}', ${chIdx}, ${tIdx})" class="text-slate-300 hover:text-red-400">×</button>
-                                                    </div>
-                                                `).join('')}
-                                            </div>
-
-                                            <!-- Add Sub-materi Form -->
-                                            <div class="flex gap-2">
-                                                <input id="topic-t-${s.id}-${chIdx}" class="flex-1 p-2 bg-slate-50 border-none rounded-lg text-xs font-bold focus:ring-1 focus:ring-emerald-500" placeholder="Judul Materi">
-                                                <input id="topic-l-${s.id}-${chIdx}" class="flex-1 p-2 bg-slate-50 border-none rounded-lg text-xs font-bold focus:ring-1 focus:ring-emerald-500" placeholder="Link Video/PDF">
-                                                <button onclick="window.addTopic('${s.id}', ${chIdx})" class="bg-emerald-500 text-white px-3 py-2 rounded-lg text-[10px] font-black uppercase">Simpan</button>
-                                            </div>
+                            <div class="space-y-4">
+                                ${(s.chapters || []).map((ch, chIdx) => `
+                                    <div class="bg-white p-4 rounded-2xl border border-slate-100">
+                                        <div class="flex justify-between mb-2">
+                                            <span class="font-bold text-sm">BAB ${chIdx+1}: ${ch.title}</span>
+                                            <button onclick="window.removeBab('${s.id}', ${chIdx})" class="text-xs text-red-300">×</button>
                                         </div>
-                                    `).join('')}
-
-                                    <!-- Form Tambah BAB -->
-                                    <div class="flex gap-3 mt-4">
-                                        <input id="bab-title-${s.id}" class="flex-grow p-4 bg-white border-2 border-slate-100 rounded-2xl text-sm font-bold" placeholder="Tulis Judul BAB Baru...">
-                                        <button onclick="window.addBab('${s.id}')" class="bg-slate-900 text-white px-6 py-4 rounded-2xl text-xs font-black tracking-widest uppercase">Tambah BAB</button>
+                                        <div class="space-y-2 mb-4">
+                                            ${(ch.topics || []).map((t, tIdx) => `
+                                                <div class="flex justify-between text-xs bg-slate-50 p-2 rounded">
+                                                    <span>${t.title}</span>
+                                                    <button onclick="window.removeTopic('${s.id}', ${chIdx}, ${tIdx})">×</button>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <input id="topic-t-${s.id}-${chIdx}" class="flex-1 p-2 bg-slate-50 rounded text-xs" placeholder="Judul">
+                                            <input id="topic-l-${s.id}-${chIdx}" class="flex-1 p-2 bg-slate-50 rounded text-xs" placeholder="Link">
+                                            <button onclick="window.addTopic('${s.id}', ${chIdx})" class="bg-emerald-500 text-white px-3 rounded text-xs">Simpan</button>
+                                        </div>
                                     </div>
+                                `).join('')}
+                                <div class="flex gap-2 mt-4">
+                                    <input id="bab-title-${s.id}" class="flex-1 p-3 border rounded-xl" placeholder="Judul BAB Baru">
+                                    <button onclick="window.addBab('${s.id}')" class="bg-slate-900 text-white px-4 rounded-xl text-xs font-bold">TAMBAH BAB</button>
                                 </div>
                             </div>
                         </div>
-                    `).join(window.appState.subjects.length ? '' : '<div class="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200 text-slate-400 font-bold italic">Belum ada mata pelajaran. Silakan buat satu di panel kiri.</div>')}
+                    `).join('')}
                 </div>
             </div>`;
         }
 
-        // --- CONTROLLERS ---
-
         window.setAdminView = (v) => { window.appState.adminView = v; window.renderApp(); };
 
         window.addMapel = async () => {
-            const nameEl = document.getElementById('new-mapel-name');
-            const iconEl = document.getElementById('new-mapel-icon');
-            const name = nameEl.value;
-            const icon = iconEl.value;
-            if (!name) return window.showNotify("Isi nama mapel!");
-            
-            try {
-                await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects'), {
-                    name, icon: icon || '📚', chapters: []
-                });
-                nameEl.value = ''; iconEl.value = '';
-                window.showNotify("Mapel berhasil dibuat!");
-            } catch(e) { window.showNotify("Gagal menyimpan."); }
+            const name = document.getElementById('new-mapel-name').value;
+            const icon = document.getElementById('new-mapel-icon').value || '📚';
+            if (!name) return;
+            await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects'), { name, icon, chapters: [] });
+            document.getElementById('new-mapel-name').value = '';
+            window.showNotify("Mapel ditambahkan!");
         };
 
         window.deleteMapel = async (id) => {
-            if (!confirm("Hapus mapel ini beserta seluruh isinya?")) return;
-            await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', id));
+            if (confirm("Hapus mapel ini?")) await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', id));
         };
 
         window.addBab = async (sId) => {
             const input = document.getElementById(`bab-title-${sId}`);
             const title = input.value;
             if (!title) return;
-            
             const sRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', sId);
-            const subject = window.appState.subjects.find(s => s.id === sId);
-            const newChapters = [...(subject.chapters || []), { title, topics: [] }];
-            
-            await window.updateDoc(sRef, { chapters: newChapters });
+            const chapters = [...(window.appState.subjects.find(s => s.id === sId).chapters || []), { title, topics: [] }];
+            await window.updateDoc(sRef, { chapters });
             input.value = '';
-            window.showNotify("BAB baru ditambahkan!");
         };
 
         window.removeBab = async (sId, idx) => {
-            if (!confirm("Hapus BAB ini?")) return;
             const sRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', sId);
             const chapters = [...window.appState.subjects.find(s => s.id === sId).chapters];
             chapters.splice(idx, 1);
@@ -544,19 +521,13 @@
         };
 
         window.addTopic = async (sId, chIdx) => {
-            const tInput = document.getElementById(`topic-t-${sId}-${chIdx}`);
-            const lInput = document.getElementById(`topic-l-${sId}-${chIdx}`);
-            const title = tInput.value;
-            const link = lInput.value;
-            if (!title || !link) return window.showNotify("Isi judul & link!");
-            
+            const t = document.getElementById(`topic-t-${sId}-${chIdx}`).value;
+            const l = document.getElementById(`topic-l-${sId}-${chIdx}`).value;
+            if (!t || !l) return;
             const sRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', sId);
             const chapters = JSON.parse(JSON.stringify(window.appState.subjects.find(s => s.id === sId).chapters));
-            chapters[chIdx].topics.push({ title, link });
-            
+            chapters[chIdx].topics.push({ title: t, link: l });
             await window.updateDoc(sRef, { chapters });
-            tInput.value = ''; lInput.value = '';
-            window.showNotify("Materi ditambahkan ke BAB!");
         };
 
         window.removeTopic = async (sId, chIdx, tIdx) => {
