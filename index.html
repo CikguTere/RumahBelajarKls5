@@ -102,21 +102,12 @@
             background-color: white;
             font-size: 0.85rem;
         }
-
-        .custom-scroll::-webkit-scrollbar { width: 6px; }
-        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
     </style>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, query, onSnapshot, getDoc, updateDoc, deleteDoc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // Global Firebase functions
-        window.collection = collection; window.doc = doc; window.setDoc = setDoc; window.query = query;
-        window.onSnapshot = onSnapshot; window.getDoc = getDoc; window.updateDoc = updateDoc;
-        window.deleteDoc = deleteDoc; window.addDoc = addDoc; window.serverTimestamp = serverTimestamp;
 
         const manualFirebaseConfig = {
             apiKey: "AIzaSyD8mRXy6oyNpHQ6uJ_xX8YS8spWYU0wXTg",
@@ -127,55 +118,53 @@
             appId: "1:69406397949:web:3d0edd30e5bf273b623594"
         };
 
-        let firebaseConfig = (typeof __firebase_config !== 'undefined') ? JSON.parse(__firebase_config) : manualFirebaseConfig;
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        window.collection = collection; window.doc = doc; window.setDoc = setDoc; window.query = query;
+        window.onSnapshot = onSnapshot; window.getDoc = getDoc; window.updateDoc = updateDoc;
+        window.deleteDoc = deleteDoc; window.addDoc = addDoc; window.serverTimestamp = serverTimestamp;
 
-        window.hideLoading = () => {
+        let firebaseConfig;
+        try {
+            firebaseConfig = (typeof __firebase_config !== 'undefined') ? JSON.parse(__firebase_config) : manualFirebaseConfig;
+        } catch(e) {
+            firebaseConfig = manualFirebaseConfig;
+        }
+        
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'rumah-belajar-kls-5';
+
+        const app = initializeApp(firebaseConfig);
+        window.db = getFirestore(app);
+        window.auth = getAuth(app);
+        
+        onAuthStateChanged(window.auth, (user) => {
+            window.currentUser = user;
+            if (user) {
+                window.startDataListeners();
+            }
             document.getElementById('loading-overlay').style.display = 'none';
             document.getElementById('app-container').classList.add('visible');
             window.renderApp();
-        };
+        });
 
-        if (firebaseConfig.apiKey) {
+        const initAuth = async () => {
             try {
-                const app = initializeApp(firebaseConfig);
-                window.db = getFirestore(app);
-                window.auth = getAuth(app);
-                
-                onAuthStateChanged(window.auth, (user) => {
-                    window.currentUser = user;
-                    if (user) {
-                        console.log("Authenticated as:", user.uid);
-                        window.startDataListeners();
-                    }
-                    window.hideLoading();
-                });
-
-                const initAuth = async () => {
-                    try {
-                        if (initialAuthToken) {
-                            await signInWithCustomToken(window.auth, initialAuthToken);
-                        } else {
-                            await signInAnonymously(window.auth);
-                        }
-                    } catch (e) {
-                        console.error("Auth Error:", e);
-                        window.showNotify("Koneksi gagal. Periksa sinyal Anda.");
-                        window.hideLoading();
-                    }
-                };
-                initAuth();
-            } catch (err) { 
-                console.error("Firebase Init Error:", err);
-                window.hideLoading(); 
+                if (initialAuthToken) {
+                    await signInWithCustomToken(window.auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(window.auth);
+                }
+            } catch (e) {
+                console.error("Koneksi auth gagal:", e);
+                setTimeout(initAuth, 2000);
             }
-        }
+        };
+        initAuth();
     </script>
 </head>
 <body class="antialiased">
     <div id="loading-overlay" class="fixed inset-0 bg-white flex flex-col items-center justify-center z-[9999]">
         <div class="loader mb-4"></div>
-        <h1 class="text-xl font-bold">Menghubungkan...</h1>
+        <h1 class="text-xl font-bold text-slate-900">Menyambungkan ke Server...</h1>
     </div>
 
     <div id="app-container" class="hidden flex-grow">
@@ -198,8 +187,6 @@
     </div>
 
     <script>
-        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        
         window.appState = {
             activeTab: 'login',
             subjects: [],
@@ -213,20 +200,18 @@
         window.startDataListeners = () => {
             if (!window.db || !window.currentUser) return;
             
-            // Listen Subjects
             const qSub = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects');
             window.onSnapshot(qSub, (snap) => {
                 window.appState.subjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.renderApp();
-            }, (err) => console.error("Firestore Subjects Error:", err));
+            }, (error) => console.error("Firestore Error:", error));
 
-            // Listen Attendance
             const qAtt = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
             window.onSnapshot(qAtt, (snap) => {
                 window.appState.attendance = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.appState.attendance.sort((a,b) => (b.serverTime?.toMillis() || 0) - (a.serverTime?.toMillis() || 0));
                 window.renderApp();
-            }, (err) => console.error("Firestore Attendance Error:", err));
+            }, (error) => console.error("Firestore Error:", error));
         };
 
         window.renderApp = () => {
@@ -235,9 +220,9 @@
             if (!tabsContainer || !container) return;
 
             const tabs = [
-                { id: 'login', label: 'Masuk' },
-                { id: 'mapel', label: 'Pelajaran' },
-                { id: 'admin', label: 'Dashboard Guru' }
+                { id: 'login', label: 'Absen' },
+                { id: 'mapel', label: 'Materi' },
+                { id: 'admin', label: 'Admin' }
             ];
             
             tabsContainer.innerHTML = tabs.map(t => `
@@ -253,7 +238,7 @@
 
         window.switchTab = (tab) => { 
             if (tab === 'mapel' && !window.appState.studentProfile) {
-                window.showNotify("Silakan absen dulu!");
+                window.showNotify("Silakan isi absen terlebih dahulu!");
                 window.appState.activeTab = 'login';
             } else {
                 window.appState.activeTab = tab; 
@@ -270,10 +255,7 @@
             setTimeout(() => div.remove(), 3000);
         };
 
-        window.goBackToSubjects = () => { 
-            window.appState.viewingSubject = null;
-            window.switchTab('mapel'); 
-        };
+        window.goBackToSubjects = () => { window.appState.viewingSubject = null; window.switchTab('mapel'); };
 
         function renderLogin(container) {
             if (window.appState.studentProfile) {
@@ -288,7 +270,7 @@
             } else {
                 container.innerHTML = `
                 <div class="max-w-lg mx-auto glass p-8 rounded-[2rem] card-shadow">
-                    <h2 class="text-2xl font-black text-center mb-6">Absensi Siswa</h2>
+                    <h2 class="text-2xl font-black text-center mb-6 text-slate-900">Masuk Kelas</h2>
                     <div class="space-y-4">
                         <input id="s-nama" class="input-elegant w-full p-4 rounded-xl font-bold" placeholder="Nama Lengkap">
                         <input id="s-sekolah" class="input-elegant w-full p-4 rounded-xl font-bold" placeholder="Asal Sekolah">
@@ -297,7 +279,7 @@
                             <option value="5B">Kelas 5B</option>
                             <option value="5C">Kelas 5C</option>
                         </select>
-                        <button id="btn-absen" onclick="window.saveProfile()" class="w-full btn-primary text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg">Masuk Kelas</button>
+                        <button id="btn-absen" onclick="window.saveProfile()" class="w-full btn-primary text-white py-4 rounded-xl font-black uppercase tracking-widest shadow-lg">KIRIM ABSEN</button>
                     </div>
                 </div>`;
             }
@@ -307,42 +289,25 @@
             const nama = document.getElementById('s-nama').value.trim();
             const sekolah = document.getElementById('s-sekolah').value.trim();
             const kelas = document.getElementById('s-kelas').value;
-            const btn = document.getElementById('btn-absen');
-
-            if (!nama || !sekolah) return window.showNotify("Harap isi nama dan sekolah!");
+            if (!nama || !sekolah) return window.showNotify("Lengkapi data!");
             
-            // Cek apakah Firebase sudah siap
-            if (!window.currentUser || !window.db) {
-                return window.showNotify("Masih menghubungkan ke server, coba lagi sebentar...");
-            }
+            const btn = document.getElementById('btn-absen');
+            btn.disabled = true;
+            btn.innerText = "MENGIRIM...";
 
             try {
-                btn.disabled = true;
-                btn.innerText = "MENGIRIM...";
-                
-                const profile = { 
-                    nama, 
-                    sekolah, 
-                    kelas, 
-                    uid: window.currentUser.uid,
-                    timestamp: new Date().toISOString() 
-                };
-
-                // Path sesuai MANDATORY RULE 1
+                const profile = { nama, sekolah, kelas, uid: window.currentUser.uid };
                 await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance'), { 
                     ...profile, 
                     serverTime: window.serverTimestamp() 
                 });
-
                 localStorage.setItem('student_profile', JSON.stringify(profile));
                 window.appState.studentProfile = profile;
-                window.showNotify("Berhasil Absen!");
                 window.renderApp();
             } catch(e) { 
-                console.error("Save Error:", e);
-                window.showNotify("Gagal terhubung ke database. Coba lagi."); 
+                window.showNotify("Gagal mengirim absen.");
                 btn.disabled = false;
-                btn.innerText = "MASUK KELAS";
+                btn.innerText = "KIRIM ABSEN";
             }
         };
 
@@ -360,13 +325,16 @@
                             <h3 class="font-bold text-lg mb-4 text-emerald-600">BAB ${idx+1}: ${ch.title}</h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 ${(ch.topics || []).map(t => `
-                                    <a href="${t.link}" target="_blank" class="p-4 bg-white border border-slate-100 rounded-xl hover:border-emerald-500 transition-all flex items-center gap-3">
-                                        <span>📖</span> <span class="font-medium text-slate-700">${t.title}</span>
+                                    <a href="${t.link}" target="_blank" class="p-4 bg-white border border-slate-100 rounded-xl hover:border-emerald-500 transition-all flex items-center justify-between group">
+                                        <div class="flex items-center gap-3">
+                                            <span>📖</span> <span class="font-medium text-slate-700 text-sm">${t.title}</span>
+                                        </div>
+                                        <span class="opacity-0 group-hover:opacity-100 transition-opacity text-emerald-500">➜</span>
                                     </a>
                                 `).join('')}
                             </div>
                         </div>
-                    `).join(s.chapters?.length ? '' : '<p class="text-center text-slate-400 py-10">Materi belum ada.</p>')}
+                    `).join(s.chapters?.length ? '' : '<p class="text-center text-slate-400 py-10 italic">Materi belum tersedia.</p>')}
                 </div>`;
                 return;
             }
@@ -376,37 +344,41 @@
                 ${window.appState.subjects.map(s => `
                     <div onclick="window.openSubject('${s.id}')" class="glass p-8 rounded-[2rem] card-shadow text-center cursor-pointer hover:scale-105 transition-transform">
                         <div class="text-5xl mb-4">${s.icon || '📚'}</div>
-                        <h3 class="font-black text-xl">${s.name}</h3>
+                        <h3 class="font-black text-xl text-slate-900">${s.name}</h3>
+                        <p class="text-[10px] text-slate-400 font-bold uppercase mt-2">${(s.chapters || []).length} Bab</p>
                     </div>
                 `).join('')}
-                ${window.appState.subjects.length === 0 ? '<p class="col-span-full text-center py-20 text-slate-400 italic">Memuat materi...</p>' : ''}
+                ${window.appState.subjects.length === 0 ? '<div class="col-span-full py-20 text-center"><div class="loader mx-auto mb-4"></div></div>' : ''}
             </div>`;
         }
 
-        window.openSubject = (id) => {
-            window.appState.viewingSubject = window.appState.subjects.find(s => s.id === id);
-            window.renderApp();
+        window.openSubject = (id) => { 
+            window.appState.viewingSubject = window.appState.subjects.find(s => s.id === id); 
+            window.renderApp(); 
         };
 
         function renderAdmin(container) {
             if (!window.appState.isAdminLoggedIn) {
                 container.innerHTML = `
-                <div class="max-w-md mx-auto glass p-10 rounded-[2rem] card-shadow text-center">
-                    <h2 class="text-xl font-black mb-6">Login Guru</h2>
-                    <input id="admin-pw" type="password" class="input-elegant w-full p-4 rounded-xl text-center mb-4" placeholder="Sandi">
-                    <button onclick="window.checkAdmin()" class="w-full btn-primary text-white py-4 rounded-xl font-bold">Masuk</button>
+                <div class="max-w-md mx-auto glass p-10 rounded-[2rem] card-shadow text-center mt-12">
+                    <div class="w-16 h-16 bg-slate-900 text-white rounded-2xl flex items-center justify-center text-2xl mx-auto mb-6">🔐</div>
+                    <h2 class="text-xl font-black mb-6 text-slate-900">Login Admin</h2>
+                    <div class="space-y-4">
+                        <input id="admin-pw" type="password" class="input-elegant w-full p-4 rounded-xl text-center" placeholder="Masukkan Password">
+                        <button onclick="window.checkAdmin()" class="w-full btn-primary text-white py-4 rounded-xl font-bold uppercase tracking-widest">MASUK</button>
+                    </div>
                 </div>`;
                 return;
             }
 
             container.innerHTML = `
             <div class="space-y-6">
-                <div class="flex flex-col sm:flex-row justify-between items-center glass p-6 rounded-3xl gap-4 shadow-sm">
-                    <div class="flex gap-2 bg-slate-100 p-1.5 rounded-2xl">
-                        <button onclick="window.setAdminView('attendance')" class="px-6 py-2.5 rounded-xl font-black text-xs tracking-widest uppercase transition-all ${window.appState.adminView === 'attendance' ? 'bg-white shadow-md text-emerald-600' : 'text-slate-400'}">Data Absensi</button>
-                        <button onclick="window.setAdminView('manage')" class="px-6 py-2.5 rounded-xl font-black text-xs tracking-widest uppercase transition-all ${window.appState.adminView === 'manage' ? 'bg-white shadow-md text-emerald-600' : 'text-slate-400'}">Kelola Pelajaran</button>
+                <div class="flex justify-between items-center glass p-4 rounded-2xl shadow-sm">
+                    <div class="flex gap-2">
+                        <button onclick="window.setAdminView('attendance')" class="px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider ${window.appState.adminView === 'attendance' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}">Absensi</button>
+                        <button onclick="window.setAdminView('manage')" class="px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider ${window.appState.adminView === 'manage' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400'}">Materi</button>
                     </div>
-                    <button onclick="window.adminLogout()" class="bg-red-50 text-red-500 px-4 py-2 rounded-xl font-bold text-xs hover:bg-red-100 transition-colors">Logout</button>
+                    <button onclick="window.adminLogout()" class="text-red-500 text-xs font-bold px-4 py-2">Keluar</button>
                 </div>
                 ${window.appState.adminView === 'attendance' ? renderAdminAttendance() : renderAdminManage()}
             </div>`;
@@ -414,18 +386,18 @@
 
         function renderAdminAttendance() {
             return `
-            <div class="glass p-8 rounded-[2.5rem] card-shadow overflow-hidden">
-                <h3 class="font-black text-xl mb-6">Daftar Kehadiran (${window.appState.attendance.length})</h3>
-                <div class="table-container custom-scroll">
+            <div class="glass p-6 rounded-[2rem] card-shadow">
+                <h2 class="text-lg font-black mb-6 text-slate-900">Daftar Kehadiran</h2>
+                <div class="table-container">
                     <table class="w-full">
                         <thead><tr><th>Waktu</th><th>Nama</th><th>Kelas</th><th>Sekolah</th></tr></thead>
                         <tbody>
                             ${window.appState.attendance.map(a => `
                                 <tr>
-                                    <td class="text-[10px] text-slate-400">${a.serverTime?.toDate().toLocaleString('id-ID') || '-'}</td>
-                                    <td class="font-black text-slate-800">${a.nama}</td>
-                                    <td class="font-bold text-emerald-600 uppercase text-xs">${a.kelas || '-'}</td>
-                                    <td class="text-slate-500 text-sm">${a.sekolah}</td>
+                                    <td class="text-[10px] text-slate-400 font-bold">${a.serverTime?.toDate().toLocaleString('id-ID') || 'Baru Saja'}</td>
+                                    <td class="font-bold text-slate-700">${a.nama}</td>
+                                    <td class="font-black text-emerald-600">${a.kelas}</td>
+                                    <td class="text-slate-500">${a.sekolah}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -436,50 +408,45 @@
 
         function renderAdminManage() {
             return `
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div class="glass p-8 rounded-[2.5rem] card-shadow">
-                    <h3 class="font-black text-lg mb-6">Mapel Baru</h3>
-                    <div class="space-y-4">
-                        <input id="new-mapel-name" class="input-elegant w-full p-4 rounded-xl" placeholder="Nama Pelajaran">
-                        <input id="new-mapel-icon" class="input-elegant w-full p-4 rounded-xl" placeholder="Ikon Emoji">
-                        <button onclick="window.addMapel()" class="w-full btn-primary text-white py-4 rounded-xl font-black">TAMBAH MAPEL</button>
-                    </div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="glass p-6 rounded-[2rem] shadow-sm h-fit">
+                    <h3 class="font-black mb-4 text-slate-900 text-sm uppercase">Mapel Baru</h3>
+                    <input id="new-mapel-name" class="input-elegant w-full p-3 rounded-xl mb-3 text-sm font-bold" placeholder="Nama Mata Pelajaran">
+                    <input id="new-mapel-icon" class="input-elegant w-full p-3 rounded-xl mb-3 text-center text-sm" placeholder="Ikon Emoji">
+                    <button onclick="window.addMapel()" class="w-full btn-primary text-white py-3 rounded-xl font-bold uppercase text-[10px]">BUAT MAPEL</button>
                 </div>
                 <div class="lg:col-span-2 space-y-6">
                     ${window.appState.subjects.map(s => `
-                        <div class="glass p-8 rounded-[2.5rem] card-shadow">
+                        <div class="glass p-6 rounded-[2rem] card-shadow border-l-8 border-emerald-500">
                             <div class="flex justify-between items-center mb-6">
-                                <div class="flex items-center gap-4">
-                                    <span class="text-4xl">${s.icon}</span>
-                                    <h4 class="font-black text-xl">${s.name}</h4>
-                                </div>
-                                <button onclick="window.deleteMapel('${s.id}')" class="text-red-400">Hapus</button>
+                                <span class="text-xl font-black text-slate-900">${s.icon} ${s.name}</span>
+                                <button onclick="window.deleteMapel('${s.id}')" class="text-red-400 text-[10px] font-bold">Hapus</button>
                             </div>
                             <div class="space-y-4">
                                 ${(s.chapters || []).map((ch, chIdx) => `
-                                    <div class="bg-white p-4 rounded-2xl border border-slate-100">
-                                        <div class="flex justify-between mb-2">
-                                            <span class="font-bold text-sm">BAB ${chIdx+1}: ${ch.title}</span>
-                                            <button onclick="window.removeBab('${s.id}', ${chIdx})" class="text-xs text-red-300">×</button>
+                                    <div class="bg-white p-4 rounded-2xl border border-slate-200">
+                                        <div class="flex justify-between items-center mb-4">
+                                            <span class="font-black text-[10px] text-slate-400 uppercase">BAB ${chIdx+1}: ${ch.title}</span>
+                                            <button onclick="window.removeBab('${s.id}', ${chIdx})" class="text-red-300 text-[10px]">HAPUS</button>
                                         </div>
                                         <div class="space-y-2 mb-4">
                                             ${(ch.topics || []).map((t, tIdx) => `
-                                                <div class="flex justify-between text-xs bg-slate-50 p-2 rounded">
-                                                    <span>${t.title}</span>
-                                                    <button onclick="window.removeTopic('${s.id}', ${chIdx}, ${tIdx})">×</button>
+                                                <div class="flex justify-between items-center bg-slate-50 p-2 rounded-lg text-[11px]">
+                                                    <span class="font-bold text-slate-700 truncate">${t.title}</span>
+                                                    <button onclick="window.removeTopic('${s.id}', ${chIdx}, ${tIdx})" class="text-red-400 px-2 font-bold">×</button>
                                                 </div>
                                             `).join('')}
                                         </div>
-                                        <div class="flex gap-2">
-                                            <input id="topic-t-${s.id}-${chIdx}" class="flex-1 p-2 bg-slate-50 rounded text-xs" placeholder="Judul">
-                                            <input id="topic-l-${s.id}-${chIdx}" class="flex-1 p-2 bg-slate-50 rounded text-xs" placeholder="Link">
-                                            <button onclick="window.addTopic('${s.id}', ${chIdx})" class="bg-emerald-500 text-white px-3 rounded text-xs">Simpan</button>
+                                        <div class="flex flex-col gap-2">
+                                            <input id="topic-t-${s.id}-${chIdx}" class="w-full p-2 bg-slate-100 border rounded-lg text-[11px]" placeholder="Judul Materi">
+                                            <input id="topic-l-${s.id}-${chIdx}" class="w-full p-2 bg-slate-100 border rounded-lg text-[11px]" placeholder="Link Materi">
+                                            <button onclick="window.addTopic('${s.id}', ${chIdx})" class="bg-emerald-500 text-white py-2 rounded-lg text-[9px] font-black">TAMBAH</button>
                                         </div>
                                     </div>
                                 `).join('')}
-                                <div class="flex gap-2 mt-4">
-                                    <input id="bab-title-${s.id}" class="flex-1 p-3 border rounded-xl" placeholder="Judul BAB Baru">
-                                    <button onclick="window.addBab('${s.id}')" class="bg-slate-900 text-white px-4 rounded-xl text-xs font-bold">TAMBAH BAB</button>
+                                <div class="flex gap-2 pt-4">
+                                    <input id="bab-title-${s.id}" class="flex-1 p-2 border rounded-lg text-[11px]" placeholder="Judul Bab">
+                                    <button onclick="window.addBab('${s.id}')" class="bg-slate-900 text-white px-4 rounded-lg text-[9px] font-black uppercase">TAMBAH BAB</button>
                                 </div>
                             </div>
                         </div>
@@ -489,26 +456,43 @@
         }
 
         window.setAdminView = (v) => { window.appState.adminView = v; window.renderApp(); };
-
-        window.addMapel = async () => {
-            const name = document.getElementById('new-mapel-name').value;
-            const icon = document.getElementById('new-mapel-icon').value || '📚';
-            if (!name) return;
-            await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects'), { name, icon, chapters: [] });
-            document.getElementById('new-mapel-name').value = '';
-            window.showNotify("Mapel ditambahkan!");
+        
+        window.checkAdmin = () => {
+            const pwInput = document.getElementById('admin-pw');
+            if (pwInput.value === 'admin123') {
+                window.appState.isAdminLoggedIn = true;
+                sessionStorage.setItem('admin_session', 'active');
+                window.renderApp();
+            } else { 
+                window.showNotify("Password Salah!"); 
+                pwInput.value = '';
+            }
         };
 
-        window.deleteMapel = async (id) => {
-            if (confirm("Hapus mapel ini?")) await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', id));
+        window.adminLogout = () => { 
+            window.appState.isAdminLoggedIn = false; 
+            sessionStorage.removeItem('admin_session'); 
+            window.renderApp(); 
+        };
+
+        window.addMapel = async () => {
+            const name = document.getElementById('new-mapel-name').value.trim();
+            const icon = document.getElementById('new-mapel-icon').value.trim() || '📚';
+            if (!name) return;
+            try {
+                await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects'), { name, icon, chapters: [] });
+            } catch(e) { window.showNotify("Gagal!"); }
+        };
+
+        window.deleteMapel = async (id) => { 
+            if (confirm("Hapus mapel?")) await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', id));
         };
 
         window.addBab = async (sId) => {
             const input = document.getElementById(`bab-title-${sId}`);
-            const title = input.value;
-            if (!title) return;
+            if (!input.value.trim()) return;
             const sRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', sId);
-            const chapters = [...(window.appState.subjects.find(s => s.id === sId).chapters || []), { title, topics: [] }];
+            const chapters = [...(window.appState.subjects.find(s => s.id === sId).chapters || []), { title: input.value.trim(), topics: [] }];
             await window.updateDoc(sRef, { chapters });
             input.value = '';
         };
@@ -521,8 +505,8 @@
         };
 
         window.addTopic = async (sId, chIdx) => {
-            const t = document.getElementById(`topic-t-${sId}-${chIdx}`).value;
-            const l = document.getElementById(`topic-l-${sId}-${chIdx}`).value;
+            const t = document.getElementById(`topic-t-${sId}-${chIdx}`).value.trim();
+            const l = document.getElementById(`topic-l-${sId}-${chIdx}`).value.trim();
             if (!t || !l) return;
             const sRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', sId);
             const chapters = JSON.parse(JSON.stringify(window.appState.subjects.find(s => s.id === sId).chapters));
@@ -535,20 +519,6 @@
             const chapters = JSON.parse(JSON.stringify(window.appState.subjects.find(s => s.id === sId).chapters));
             chapters[chIdx].topics.splice(tIdx, 1);
             await window.updateDoc(sRef, { chapters });
-        };
-
-        window.checkAdmin = () => {
-            if (document.getElementById('admin-pw').value === 'admin123') {
-                window.appState.isAdminLoggedIn = true;
-                sessionStorage.setItem('admin_session', 'active');
-                window.renderApp();
-            } else { window.showNotify("Sandi salah!"); }
-        };
-
-        window.adminLogout = () => {
-            window.appState.isAdminLoggedIn = false;
-            sessionStorage.removeItem('admin_session');
-            window.renderApp();
         };
 
         window.switchTab('login');
