@@ -149,7 +149,6 @@
                 onAuthStateChanged(window.auth, (user) => {
                     window.currentUser = user;
                     if (user) {
-                        // Jalankan listener segera setelah auth berhasil
                         window.startDataListeners();
                     }
                     window.hideLoading();
@@ -206,42 +205,38 @@
             subjects: [],
             attendance: [],
             studentProfile: JSON.parse(localStorage.getItem('student_profile')) || null,
-            isAdminLoggedIn: false, // Reset setiap reload untuk keamanan
+            isAdminLoggedIn: sessionStorage.getItem('admin_session') === 'active',
             viewingSubject: null
         };
 
-        // Cek status admin dari sessionStorage saat start
-        if (sessionStorage.getItem('admin_session') === 'active') {
-            window.appState.isAdminLoggedIn = true;
-        }
-
         window.startDataListeners = () => {
-            if (!window.db || window.listenerActive) return;
-            window.listenerActive = true;
+            if (!window.db) return;
             
             // Listener Pelajaran
             const qSub = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects');
             window.onSnapshot(qSub, (snap) => {
                 window.appState.subjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.renderApp();
-            });
+            }, (err) => console.error("Subject error:", err));
 
             // Listener Absensi (Global Real-time)
             const qAtt = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
             window.onSnapshot(qAtt, (snap) => {
                 window.appState.attendance = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
                 // Urutkan berdasarkan waktu terbaru
                 window.appState.attendance.sort((a,b) => {
-                    const timeA = a.serverTime?.seconds || new Date(a.timestamp).getTime() / 1000;
-                    const timeB = b.serverTime?.seconds || new Date(b.timestamp).getTime() / 1000;
+                    const timeA = a.serverTime?.toMillis() || new Date(a.timestamp).getTime();
+                    const timeB = b.serverTime?.toMillis() || new Date(b.timestamp).getTime();
                     return timeB - timeA;
                 });
                 
-                // Update UI tabel jika sedang di halaman admin
-                if (window.appState.activeTab === 'admin' && window.appState.isAdminLoggedIn) {
+                // Jika sedang di tab admin, langsung refresh tabel
+                if (window.appState.activeTab === 'admin') {
                     window.updateAttendanceUI();
                 }
-            });
+                window.renderApp();
+            }, (err) => console.error("Attendance error:", err));
         };
 
         window.renderApp = () => {
@@ -333,17 +328,31 @@
                 window.showNotify("Data belum lengkap!"); return;
             }
 
-            const profile = { nama, provinsi, sekolah, kelas, timestamp: new Date().toISOString() };
-            if (window.db) {
+            const profile = { 
+                nama, 
+                provinsi, 
+                sekolah, 
+                kelas, 
+                timestamp: new Date().toISOString() 
+            };
+
+            if (window.db && window.currentUser) {
                 try {
                     await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance'), { 
-                        ...profile, serverTime: window.serverTimestamp() 
+                        ...profile, 
+                        serverTime: window.serverTimestamp() 
                     });
-                } catch(e) { console.error(e); }
+                    localStorage.setItem('student_profile', JSON.stringify(profile));
+                    window.appState.studentProfile = profile;
+                    window.showNotify("Presensi berhasil!");
+                    window.renderApp();
+                } catch(e) { 
+                    console.error("Save error:", e);
+                    window.showNotify("Gagal menyimpan data ke cloud.");
+                }
+            } else {
+                window.showNotify("Belum terhubung ke server.");
             }
-            localStorage.setItem('student_profile', JSON.stringify(profile));
-            window.appState.studentProfile = profile;
-            window.renderApp();
         };
 
         function renderMapel(container) {
@@ -410,37 +419,31 @@
                 </div>
 
                 <div class="glass p-8 rounded-[2.5rem] card-shadow">
-                    <h3 class="font-black text-xl mb-6">Tambah Mata Pelajaran</h3>
-                    <div class="flex gap-4">
-                        <input id="new-sub-icon" class="w-20 p-4 border-2 rounded-2xl text-center text-2xl" value="📚">
-                        <input id="new-sub-name" class="flex-grow p-4 border-2 rounded-2xl font-bold" placeholder="Nama Pelajaran">
-                        <button onclick="window.addSub()" class="btn-primary text-white px-8 rounded-2xl font-black">Tambah</button>
-                    </div>
-                </div>
-
-                <div class="glass p-8 rounded-[2.5rem] card-shadow">
                     <div class="flex justify-between items-center mb-6">
                         <h3 class="font-black text-xl">Daftar Kehadiran Siswa</h3>
                         <div class="bg-emerald-500 text-white px-4 py-1 rounded-lg font-black" id="att-count">0</div>
                     </div>
                     <div class="table-container custom-scroll border-2 border-slate-100">
-                        <table>
+                        <table class="min-w-full">
                             <thead>
                                 <tr>
-                                    <th>Waktu</th>
+                                    <th>Waktu Masuk</th>
                                     <th>Nama Siswa</th>
                                     <th>Kelas</th>
                                     <th>Sekolah</th>
                                     <th>Provinsi</th>
                                 </tr>
                             </thead>
-                            <tbody id="attendance-list"></tbody>
+                            <tbody id="attendance-list">
+                                <!-- Data akan masuk via JS -->
+                            </tbody>
                         </table>
                     </div>
                 </div>
             </div>`;
             
-            window.updateAttendanceUI();
+            // Tunggu sebentar untuk memastikan elemen render sebelum update isi
+            setTimeout(window.updateAttendanceUI, 50);
         }
 
         window.updateAttendanceUI = () => {
@@ -449,19 +452,19 @@
             if (!list) return;
 
             const data = window.appState.attendance;
-            count.innerText = data.length;
+            if (count) count.innerText = data.length;
             
             list.innerHTML = data.map(d => {
-                const dt = new Date(d.timestamp);
+                const dt = d.serverTime ? d.serverTime.toDate() : new Date(d.timestamp);
                 return `
-                <tr>
+                <tr class="hover:bg-slate-50 transition-colors">
                     <td class="font-bold text-slate-500 text-xs">${dt.toLocaleString('id-ID')}</td>
                     <td class="font-black text-slate-900">${d.nama}</td>
                     <td class="font-bold text-indigo-600">${d.kelas || '-'}</td>
                     <td class="font-medium text-slate-700">${d.sekolah}</td>
                     <td class="text-slate-400 text-xs">${d.provinsi || '-'}</td>
                 </tr>`;
-            }).join('') || '<tr><td colspan="5" class="text-center py-10 font-bold italic text-slate-300">Belum ada siswa yang masuk hari ini.</td></tr>';
+            }).join('') || '<tr><td colspan="5" class="text-center py-10 font-bold italic text-slate-300">Belum ada siswa yang masuk.</td></tr>';
         };
 
         window.checkAdmin = () => {
@@ -481,18 +484,12 @@
             window.renderApp();
         };
 
-        window.addSub = async () => {
-            const name = document.getElementById('new-sub-name').value;
-            const icon = document.getElementById('new-sub-icon').value;
-            if (name && window.db) {
-                await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects'), { 
-                    name, icon, chapters: [], createdAt: window.serverTimestamp()
-                });
-                document.getElementById('new-sub-name').value = '';
+        window.onload = () => { 
+            // Cek session login admin manual agar tetap konsisten
+            if (sessionStorage.getItem('admin_session') === 'active') {
+                window.appState.isAdminLoggedIn = true;
             }
         };
-
-        window.onload = () => { if (!window.currentUser) window.renderApp(); };
     </script>
 </body>
 </html>
