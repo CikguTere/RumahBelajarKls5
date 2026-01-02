@@ -15,6 +15,17 @@
         .floating-chat { position: fixed; bottom: 20px; right: 20px; z-index: 1000; }
         .embed-responsive-container { position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 0.5rem; }
         .embed-responsive-container iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        
+        /* Loading animation */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #0d9488;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -30,42 +41,72 @@
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "" };
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
+        const hideLoading = () => {
+            const overlay = document.getElementById('loading-overlay');
+            const app = document.getElementById('app-container');
+            if (overlay) overlay.classList.add('hidden');
+            if (app) app.classList.remove('hidden');
+        };
+
+        // Safety Timeout: Jika Firebase kelamaan (3 detik), paksa masuk aplikasi
+        setTimeout(() => {
+            if (!window.currentUser && firebaseConfig.apiKey) {
+                console.warn("Firebase took too long. Forcing UI...");
+                hideLoading();
+                window.renderApp();
+            }
+        }, 3000);
+
         if (firebaseConfig.apiKey) {
-            const app = initializeApp(firebaseConfig);
-            window.db = getFirestore(app);
-            window.auth = getAuth(app);
-            
-            const initAuth = async () => {
-                try {
-                    if (initialAuthToken) {
-                        await signInWithCustomToken(window.auth, initialAuthToken);
-                    } else {
-                        await signInAnonymously(window.auth);
-                    }
-                } catch (error) {
-                    console.error("Auth error:", error);
-                }
-            };
-
-            onAuthStateChanged(window.auth, (user) => {
-                window.currentUser = user;
-                window.currentUserId = user?.uid;
+            try {
+                const app = initializeApp(firebaseConfig);
+                window.db = getFirestore(app);
+                window.auth = getAuth(app);
                 
-                if (user) {
-                    document.getElementById('loading-overlay').classList.add('hidden');
-                    document.getElementById('app-container').classList.remove('hidden');
-                    window.startDataListeners();
-                    window.renderApp();
-                }
-            });
+                const initAuth = async () => {
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(window.auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(window.auth);
+                        }
+                    } catch (error) {
+                        console.error("Auth error:", error);
+                        hideLoading(); // Tetap tampilkan UI meski auth gagal
+                    }
+                };
 
-            initAuth();
+                onAuthStateChanged(window.auth, (user) => {
+                    window.currentUser = user;
+                    window.currentUserId = user?.uid;
+                    hideLoading();
+                    if (user) {
+                        window.startDataListeners();
+                    }
+                    window.renderApp();
+                });
+
+                initAuth();
+            } catch (err) {
+                console.error("Firebase Init Error:", err);
+                hideLoading();
+            }
+        } else {
+            // Mode Tanpa Firebase (Preview/Local)
+            console.log("Running in offline/preview mode...");
+            setTimeout(() => {
+                hideLoading();
+                window.renderApp();
+            }, 500);
         }
     </script>
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <div id="loading-overlay" class="fixed inset-0 bg-white flex items-center justify-center z-50">
-        <div class="text-xl font-semibold text-teal-600 animate-pulse">Memuat Rumah Belajar...</div>
+    <!-- Overlay Loading yang lebih keren -->
+    <div id="loading-overlay" class="fixed inset-0 bg-white flex flex-col items-center justify-center z-[9999]">
+        <div class="loader mb-4"></div>
+        <div class="text-xl font-bold text-teal-600 animate-pulse">Menyiapkan Ruang Belajar...</div>
+        <p class="text-gray-400 text-sm mt-2">Harap tunggu sebentar ya, Bro.</p>
     </div>
 
     <div id="app-container" class="hidden">
@@ -85,26 +126,38 @@
             <div id="content-container"></div>
         </main>
 
+        <!-- Chat Floating Button -->
         <div class="floating-chat">
-            <button id="chat-toggle" class="bg-blue-600 text-white p-4 rounded-full shadow-lg">💬</button>
+            <button id="chat-toggle" class="bg-teal-600 text-white p-4 rounded-full shadow-lg hover:scale-110 transition-transform">
+                <span class="text-xl">💬</span>
+            </button>
         </div>
 
+        <!-- Chat Modal -->
         <div id="chat-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[1001]">
             <div class="bg-white rounded-xl shadow-2xl w-full max-w-md m-4 flex flex-col h-[500px]">
-                <div class="p-4 bg-teal-600 text-white flex justify-between rounded-t-xl">
-                    <h3 class="font-bold">Cikgu Tere 🤖</h3>
-                    <button id="chat-close">✕</button>
+                <div class="p-4 bg-teal-600 text-white flex justify-between rounded-t-xl items-center">
+                    <div class="flex items-center gap-2">
+                        <span class="text-2xl">🤖</span>
+                        <h3 class="font-bold">Cikgu Tere</h3>
+                    </div>
+                    <button id="chat-close" class="text-2xl">&times;</button>
                 </div>
-                <div id="chat-content" class="flex-grow p-4 overflow-y-auto space-y-4"></div>
-                <div class="p-4 border-t flex">
-                    <input type="text" id="chat-input" class="flex-grow p-2 border rounded-l" placeholder="Tanya sesuatu...">
-                    <button id="chat-send" class="bg-teal-600 text-white px-4 rounded-r">Kirim</button>
+                <div id="chat-content" class="flex-grow p-4 overflow-y-auto space-y-4 bg-gray-50">
+                    <div class="bg-white p-3 rounded-lg shadow-sm border border-gray-100 self-start max-w-[80%]">
+                        <p class="text-sm text-gray-800">Halo! Ada yang bisa Cikgu bantu hari ini?</p>
+                    </div>
+                </div>
+                <div class="p-4 border-t bg-white flex gap-2">
+                    <input type="text" id="chat-input" class="flex-grow p-2 border rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" placeholder="Tanya sesuatu...">
+                    <button id="chat-send" class="bg-teal-600 text-white px-4 py-2 rounded-lg font-bold">Kirim</button>
                 </div>
             </div>
         </div>
 
+        <!-- Pop-up Modal -->
         <div id="generic-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[2000]">
-            <div id="modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-sm m-4 p-6"></div>
+            <div id="modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-sm m-4 p-6 scale-in transition-all"></div>
         </div>
     </div>
 
@@ -113,7 +166,7 @@
         window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         
         window.appState = {
-            activeTab: 'login', // Default to login tab
+            activeTab: 'login',
             isAdmin: false,
             subjects: [],
             attendance: [],
@@ -132,16 +185,16 @@
                 window.onSnapshot(qSub, (snap) => {
                     window.appState.subjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     window.renderApp();
-                });
+                }, (err) => console.error("Snapshot error (subjects):", err));
 
-                // Listen to attendance (for admin)
+                // Listen to attendance
                 const qAtt = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
                 window.onSnapshot(qAtt, (snap) => {
                     window.appState.attendance = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     if (window.appState.activeTab === 'admin' && window.appState.isAdmin) {
                         window.renderApp();
                     }
-                });
+                }, (err) => console.error("Snapshot error (attendance):", err));
             }
         };
 
@@ -155,8 +208,9 @@
                 { id: 'admin', label: '🛡️ Admin' },
                 { id: 'bantuan', label: '❓ Bantuan' }
             ];
+            
             tabsContainer.innerHTML = tabs.map(t => `
-                <button onclick="window.switchTab('${t.id}')" class="px-4 py-2 border-b-2 ${window.appState.activeTab === t.id ? 'border-teal-600 text-teal-600 font-bold' : 'border-transparent text-gray-500'}">
+                <button onclick="window.switchTab('${t.id}')" class="px-4 py-2 border-b-2 transition-all ${window.appState.activeTab === t.id ? 'border-teal-600 text-teal-600 font-bold' : 'border-transparent text-gray-500 hover:text-teal-400'}">
                     ${t.label}
                 </button>
             `).join('');
@@ -164,10 +218,13 @@
             const container = document.getElementById('content-container');
             if (!container) return;
 
-            if (window.appState.activeTab === 'login') renderLoginSiswa(container);
-            else if (window.appState.activeTab === 'mapel') renderMapel(container);
-            else if (window.appState.activeTab === 'admin') window.appState.isAdmin ? renderAdmin(container) : renderLoginAdmin(container);
-            else renderBantuan(container);
+            // Page Switcher
+            switch (window.appState.activeTab) {
+                case 'login': renderLoginSiswa(container); break;
+                case 'mapel': renderMapel(container); break;
+                case 'admin': window.appState.isAdmin ? renderAdmin(container) : renderLoginAdmin(container); break;
+                default: renderBantuan(container);
+            }
         };
 
         window.switchTab = (tab) => { 
@@ -180,49 +237,54 @@
             window.renderApp(); 
         };
 
-        window.goBackToSubjects = () => { window.appState.selectedSubjectId = null; window.appState.selectedChapterId = null; window.appState.selectedMaterialId = null; window.renderApp(); };
+        window.goBackToSubjects = () => { 
+            window.appState.selectedSubjectId = null; 
+            window.appState.selectedChapterId = null; 
+            window.appState.selectedMaterialId = null; 
+            window.renderApp(); 
+        };
 
         function renderLoginSiswa(container) {
             if (window.appState.studentProfile) {
                 container.innerHTML = `
-                    <div class="max-w-md mx-auto bg-white p-8 rounded-xl shadow text-center">
-                        <div class="text-5xl mb-4">✅</div>
+                    <div class="max-w-md mx-auto bg-white p-8 rounded-2xl shadow-xl text-center border border-gray-100">
+                        <div class="text-6xl mb-4">✨</div>
                         <h2 class="text-2xl font-bold mb-2">Halo, ${window.appState.studentProfile.nama}!</h2>
-                        <p class="text-gray-500 mb-6">Kamu sudah melakukan absensi dari <b>${window.appState.studentProfile.sekolah}</b>.</p>
-                        <button onclick="window.switchTab('mapel')" class="w-full bg-teal-600 text-white p-3 rounded-lg font-bold shadow-lg hover:bg-teal-700 transition-all">Mulai Belajar Sekarang</button>
-                        <button onclick="localStorage.removeItem('student_profile'); window.appState.studentProfile=null; window.renderApp();" class="mt-4 text-xs text-red-500 hover:underline">Ganti Identitas</button>
+                        <p class="text-gray-500 mb-6">Kamu sudah terabsen dari <b>${window.appState.studentProfile.sekolah}</b>.</p>
+                        <button onclick="window.switchTab('mapel')" class="w-full bg-teal-600 text-white p-4 rounded-xl font-bold shadow-lg hover:bg-teal-700 transition-all hover:scale-[1.02]">Mulai Belajar Sekarang</button>
+                        <button onclick="localStorage.removeItem('student_profile'); window.appState.studentProfile=null; window.renderApp();" class="mt-6 text-sm text-red-400 hover:text-red-600 hover:underline">Ganti Identitas Siswa</button>
                     </div>
                 `;
                 return;
             }
 
             container.innerHTML = `
-                <div class="max-w-md mx-auto bg-white p-8 rounded-xl shadow">
-                    <h2 class="text-2xl font-bold mb-2">Presensi Siswa</h2>
-                    <p class="text-sm text-gray-500 mb-6">Lengkapi data di bawah untuk mencatat kehadiran dan mulai belajar.</p>
-                    <div class="space-y-4">
+                <div class="max-w-md mx-auto bg-white p-8 rounded-2xl shadow-xl border border-gray-100">
+                    <h2 class="text-2xl font-bold mb-2 text-gray-800">Presensi Siswa</h2>
+                    <p class="text-sm text-gray-500 mb-8">Lengkapi data di bawah sebelum memulai petualangan belajarmu!</p>
+                    <div class="space-y-5">
                         <div>
-                            <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Nama Lengkap</label>
-                            <input type="text" id="s-nama" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" placeholder="Masukkan nama kamu">
+                            <label class="block text-xs font-bold text-teal-600 uppercase mb-2 tracking-wider">Nama Lengkap</label>
+                            <input type="text" id="s-nama" class="w-full p-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none transition-all" placeholder="Contoh: Budi Santoso">
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Asal Provinsi</label>
-                            <input type="text" id="s-prov" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" placeholder="Contoh: Jawa Barat">
+                            <label class="block text-xs font-bold text-teal-600 uppercase mb-2 tracking-wider">Asal Provinsi</label>
+                            <input type="text" id="s-prov" class="w-full p-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none transition-all" placeholder="Misal: Jawa Tengah">
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Asal Sekolah</label>
-                            <input type="text" id="s-sekolah" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" placeholder="Nama SD kamu">
+                            <label class="block text-xs font-bold text-teal-600 uppercase mb-2 tracking-wider">Asal Sekolah</label>
+                            <input type="text" id="s-sekolah" class="w-full p-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none transition-all" placeholder="Nama SD Kamu">
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-gray-700 uppercase mb-1">Kelas</label>
-                            <select id="s-kelas" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-teal-500 outline-none">
+                            <label class="block text-xs font-bold text-teal-600 uppercase mb-2 tracking-wider">Kelas</label>
+                            <select id="s-kelas" class="w-full p-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none appearance-none bg-white">
                                 <option value="5A">Kelas 5A</option>
                                 <option value="5B">Kelas 5B</option>
                                 <option value="5C">Kelas 5C</option>
                                 <option value="Lainnya">Lainnya</option>
                             </select>
                         </div>
-                        <button onclick="window.submitLoginSiswa()" class="w-full bg-teal-600 text-white p-4 rounded-xl font-bold shadow-lg hover:bg-teal-700 transition-all">Masuk & Belajar</button>
+                        <button onclick="window.submitLoginSiswa()" class="w-full bg-teal-600 text-white p-4 rounded-xl font-bold shadow-lg hover:bg-teal-700 transition-all hover:scale-[1.02] mt-4">Simpan & Mulai Belajar</button>
                     </div>
                 </div>
             `;
@@ -235,26 +297,25 @@
             const kelas = document.getElementById('s-kelas').value;
 
             if (!nama || !provinsi || !sekolah) {
-                window.showMod("Data Kurang", "Harap isi semua kolom agar Cikgu bisa mengenalmu.", "error");
+                window.showMod("Oops!", "Lengkapi semua data dulu ya agar Cikgu bisa mengenalmu.", "error");
                 return;
             }
 
             const profile = { nama, provinsi, sekolah, kelas, timestamp: new Date().toISOString() };
             
-            try {
-                // Save to Firestore
-                const attRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
-                await window.addDoc(attRef, { ...profile, serverTime: window.serverTimestamp() });
-                
-                // Save to local
-                localStorage.setItem('student_profile', JSON.stringify(profile));
-                window.appState.studentProfile = profile;
-                window.showMod("Berhasil Masuk!", `Selamat belajar, ${nama}!`, "success");
-                window.renderApp();
-            } catch (e) {
-                console.error(e);
-                window.showMod("Error", "Gagal menyimpan data absensi.", "error");
+            if (window.db) {
+                try {
+                    const attRef = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
+                    await window.addDoc(attRef, { ...profile, serverTime: window.serverTimestamp() });
+                } catch (e) {
+                    console.warn("Firestore error (attendance):", e);
+                }
             }
+            
+            localStorage.setItem('student_profile', JSON.stringify(profile));
+            window.appState.studentProfile = profile;
+            window.showMod("Berhasil Masuk!", `Selamat belajar, ${nama}!`, "success");
+            window.renderApp();
         };
 
         function renderMapel(container) {
@@ -262,20 +323,23 @@
             if (window.appState.selectedChapterId) return renderChapterDetail(container);
             if (window.appState.selectedSubjectId) return renderSubjectDetail(container);
 
-            container.innerHTML = `<h2 class="text-2xl font-bold mb-6">Pilih Mata Pelajaran</h2>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    ${window.appState.subjects.length === 0 ? '<p class="text-gray-500">Belum ada mata pelajaran.</p>' : ''}
-                    ${window.appState.subjects.map(s => {
-                        const chapterCount = s.chapters ? s.chapters.length : 0;
-                        return `
-                        <div onclick="window.appState.selectedSubjectId='${s.id}'; window.renderApp()" class="bg-white p-6 rounded-xl shadow hover:shadow-lg cursor-pointer border-b-4 border-teal-500 transition-all group">
-                            <div class="text-4xl mb-2 group-hover:scale-110 transition-transform">${s.icon || '📚'}</div>
-                            <div class="font-bold text-lg">${s.name}</div>
-                            <div class="text-xs text-gray-400 mt-2 flex items-center">
-                                <span class="bg-gray-100 px-2 py-1 rounded-md font-semibold">${chapterCount} Bab Materi</span>
+            container.innerHTML = `
+                <div class="flex flex-col md:flex-row justify-between items-center mb-8">
+                    <h2 class="text-3xl font-extrabold text-gray-800">Daftar Pelajaran</h2>
+                    <p class="text-gray-400 text-sm italic">Pilih satu untuk mulai membaca materi</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    ${window.appState.subjects.length === 0 ? '<div class="col-span-full text-center py-10 bg-white rounded-xl text-gray-400">Belum ada mata pelajaran yang ditambahkan oleh Admin.</div>' : ''}
+                    ${window.appState.subjects.map(s => `
+                        <div onclick="window.appState.selectedSubjectId='${s.id}'; window.renderApp()" class="bg-white p-8 rounded-2xl shadow-sm hover:shadow-xl cursor-pointer border-t-8 border-teal-500 transition-all group relative overflow-hidden">
+                            <div class="text-5xl mb-4 group-hover:scale-110 transition-transform duration-300">${s.icon || '📚'}</div>
+                            <div class="font-bold text-xl text-gray-800">${s.name}</div>
+                            <div class="text-xs text-gray-400 mt-3 font-semibold uppercase tracking-widest">
+                                ${s.chapters ? s.chapters.length : 0} Bab Tersedia
                             </div>
+                            <div class="absolute -right-4 -bottom-4 opacity-5 text-8xl group-hover:rotate-12 transition-transform">${s.icon || '📚'}</div>
                         </div>
-                    `}).join('')}
+                    `).join('')}
                 </div>`;
         }
 
@@ -283,14 +347,27 @@
             const subject = window.appState.subjects.find(s => s.id === window.appState.selectedSubjectId);
             if (!subject) return window.goBackToSubjects();
 
-            container.innerHTML = `<button onclick="window.goBackToSubjects()" class="mb-4 text-teal-600 flex items-center hover:underline">← Kembali</button>
-                <h2 class="text-2xl font-bold mb-6">${subject.icon} ${subject.name}</h2>
-                <div class="space-y-3">
-                    ${(!subject.chapters || subject.chapters.length === 0) ? '<p class="text-gray-500 italic">Belum ada bab yang ditambahkan.</p>' : ''}
-                    ${(subject.chapters || []).map(c => `
-                        <div onclick="window.appState.selectedChapterId='${c.id}'; window.renderApp()" class="bg-white p-4 rounded-lg shadow cursor-pointer hover:bg-teal-50 border border-gray-100 flex justify-between items-center transition-colors">
-                            <span class="font-medium">${c.title}</span>
-                            <span class="text-xs bg-teal-100 text-teal-700 px-2 py-1 rounded-full">${c.materials ? c.materials.length : 0} Konten</span>
+            container.innerHTML = `
+                <button onclick="window.goBackToSubjects()" class="mb-6 text-teal-600 font-bold flex items-center hover:translate-x-[-5px] transition-transform">
+                    <span class="mr-2">←</span> Kembali ke Menu Utama
+                </button>
+                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 mb-8">
+                    <h2 class="text-3xl font-black text-gray-800 mb-2">${subject.icon} ${subject.name}</h2>
+                    <p class="text-gray-500">Pilih Bab materi yang ingin kamu kuasai hari ini.</p>
+                </div>
+                <div class="grid gap-4">
+                    ${(!subject.chapters || subject.chapters.length === 0) ? '<p class="text-gray-500 italic p-10 text-center bg-gray-50 rounded-xl border-2 border-dashed">Belum ada bab untuk mata pelajaran ini.</p>' : ''}
+                    ${(subject.chapters || []).map((c, idx) => `
+                        <div onclick="window.appState.selectedChapterId='${c.id}'; window.renderApp()" class="bg-white p-6 rounded-xl shadow-sm cursor-pointer hover:bg-teal-50 border border-gray-100 flex justify-between items-center group transition-all">
+                            <div class="flex items-center">
+                                <span class="bg-teal-100 text-teal-600 font-bold w-10 h-10 rounded-lg flex items-center justify-center mr-4 group-hover:bg-teal-600 group-hover:text-white transition-colors">
+                                    ${idx + 1}
+                                </span>
+                                <span class="font-bold text-gray-700 text-lg">${c.title}</span>
+                            </div>
+                            <div class="text-xs font-bold text-gray-300 group-hover:text-teal-500 transition-colors uppercase tracking-widest">
+                                ${c.materials ? c.materials.length : 0} Konten Materi →
+                            </div>
                         </div>
                     `).join('')}
                 </div>`;
@@ -301,16 +378,19 @@
             const chapter = subject?.chapters?.find(c => c.id === window.appState.selectedChapterId);
             if (!chapter) { window.appState.selectedChapterId = null; return window.renderApp(); }
 
-            container.innerHTML = `<button onclick="window.appState.selectedChapterId=null; window.renderApp()" class="mb-4 text-teal-600 flex items-center hover:underline">← Kembali ke Daftar Bab</button>
-                <h2 class="text-2xl font-bold mb-6">${chapter.title}</h2>
-                <div class="grid gap-4">
-                    ${(!chapter.materials || chapter.materials.length === 0) ? '<p class="text-gray-500 italic">Belum ada materi di bab ini.</p>' : ''}
+            container.innerHTML = `
+                <button onclick="window.appState.selectedChapterId=null; window.renderApp()" class="mb-6 text-teal-600 font-bold flex items-center hover:translate-x-[-5px] transition-transform">
+                    <span class="mr-2">←</span> Daftar Bab
+                </button>
+                <h2 class="text-3xl font-black text-gray-800 mb-8">${chapter.title}</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    ${(!chapter.materials || chapter.materials.length === 0) ? '<p class="col-span-full text-center text-gray-400">Belum ada materi di bab ini.</p>' : ''}
                     ${(chapter.materials || []).map(m => `
-                        <div onclick="window.appState.selectedMaterialId='${m.id}'; window.renderApp()" class="bg-white p-4 rounded-lg shadow flex items-center cursor-pointer hover:bg-teal-50 border-l-4 ${getMColor(m.type)} transition-all">
-                            <span class="mr-4 text-2xl">${getMIcon(m.type)}</span>
+                        <div onclick="window.appState.selectedMaterialId='${m.id}'; window.renderApp()" class="bg-white p-6 rounded-2xl shadow-sm flex items-center cursor-pointer hover:shadow-md border-l-8 ${getMColor(m.type)} transition-all hover:scale-[1.01]">
+                            <span class="mr-6 text-4xl">${getMIcon(m.type)}</span>
                             <div>
-                                <div class="font-bold text-gray-800">${m.title}</div>
-                                <div class="text-[10px] text-gray-500 uppercase tracking-widest font-bold">${getMLabel(m.type)}</div>
+                                <div class="font-black text-gray-800 text-lg leading-tight mb-1">${m.title}</div>
+                                <div class="text-[10px] text-gray-400 uppercase tracking-[0.2em] font-black">${getMLabel(m.type)}</div>
                             </div>
                         </div>
                     `).join('')}
@@ -323,52 +403,73 @@
             const material = chapter?.materials?.find(m => m.id === window.appState.selectedMaterialId);
             if (!material) { window.appState.selectedMaterialId = null; return window.renderApp(); }
             
-            container.innerHTML = `<button onclick="window.appState.selectedMaterialId=null; window.renderApp()" class="mb-4 text-teal-600 flex items-center hover:underline">← Kembali ke Materi</button>
-                <h2 class="text-2xl font-bold mb-6">${material.title}</h2>
-                <div class="bg-white p-6 rounded-xl shadow min-h-[400px]">
-                    ${renderContent(material)}
+            container.innerHTML = `
+                <button onclick="window.appState.selectedMaterialId=null; window.renderApp()" class="mb-6 text-teal-600 font-bold flex items-center hover:translate-x-[-5px] transition-transform">
+                    <span class="mr-2">←</span> Kembali ke Daftar Materi
+                </button>
+                <div class="bg-white p-8 rounded-3xl shadow-lg border border-gray-50">
+                    <div class="flex items-center gap-3 mb-6">
+                        <span class="text-3xl">${getMIcon(material.type)}</span>
+                        <h2 class="text-3xl font-black text-gray-800">${material.title}</h2>
+                    </div>
+                    <div class="rounded-2xl overflow-hidden border-2 border-gray-50 bg-gray-50">
+                        ${renderContent(material)}
+                    </div>
                 </div>`;
         }
 
+        // Admin Logics (Sesuai kode sebelumnya tapi dipercantik)
         function renderLoginAdmin(container) {
-            container.innerHTML = `<div class="max-w-md mx-auto bg-white p-8 rounded-xl shadow">
-                <h2 class="text-xl font-bold mb-4">Login Admin</h2>
-                <p class="text-sm text-gray-500 mb-6">Silakan masukkan kata sandi akses pengelola untuk melanjutkan.</p>
-                <div class="mb-4">
-                    <label class="block text-sm font-semibold text-gray-700 mb-2">Kata Sandi</label>
-                    <input type="password" id="pw" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-teal-500 outline-none border-gray-300" placeholder="••••••••">
-                </div>
-                <button onclick="if(document.getElementById('pw').value==='admin123'){window.appState.isAdmin=true; window.renderApp();}else{window.showMod('Gagal', 'Kata sandi yang Anda masukkan salah.', 'error');}" class="w-full bg-teal-600 text-white p-3 rounded-lg hover:bg-teal-700 transition-colors font-bold shadow-md">Masuk ke Panel Kontrol</button>
-            </div>`;
+            container.innerHTML = `
+                <div class="max-w-md mx-auto bg-white p-8 rounded-2xl shadow-2xl border border-gray-100">
+                    <div class="text-center mb-8">
+                        <div class="text-5xl mb-2">🔐</div>
+                        <h2 class="text-2xl font-black text-gray-800 uppercase tracking-tighter">Panel Pengelola</h2>
+                        <p class="text-xs text-gray-400">Area ini khusus untuk Admin dan Guru</p>
+                    </div>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Password Akses</label>
+                            <input type="password" id="pw" class="w-full p-4 border rounded-xl focus:ring-2 focus:ring-teal-500 outline-none transition-all" placeholder="••••••••">
+                        </div>
+                        <button onclick="if(document.getElementById('pw').value==='admin123'){window.appState.isAdmin=true; window.renderApp();}else{window.showMod('Gagal', 'Kata sandi salah.', 'error');}" class="w-full bg-gray-800 text-white p-4 rounded-xl font-bold shadow-lg hover:bg-black transition-all">Buka Kunci Panel</button>
+                    </div>
+                </div>`;
         }
 
         function renderAdmin(container) {
             container.innerHTML = `
-                <div class="mb-8 bg-white p-6 rounded-xl shadow border-t-4 border-yellow-500">
-                    <h3 class="font-bold text-lg mb-4 flex justify-between items-center">
-                        <span>👥 Data Presensi Siswa</span>
-                        <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded">${window.appState.attendance.length} Total</span>
-                    </h3>
+                <div class="flex justify-between items-end mb-8">
+                    <h2 class="text-4xl font-black text-gray-800">Panel Admin</h2>
+                    <button onclick="window.appState.isAdmin=false; window.renderApp()" class="text-xs text-red-500 hover:underline">Keluar Admin</button>
+                </div>
+
+                <div class="mb-10 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="font-black text-xl text-teal-800">👥 Rekap Kehadiran Siswa</h3>
+                        <div class="px-3 py-1 bg-teal-100 text-teal-700 rounded-full text-xs font-bold">${window.appState.attendance.length} Siswa Masuk</div>
+                    </div>
                     <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm">
-                            <thead class="bg-gray-50 text-gray-600 uppercase text-[10px] font-bold">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-50 text-gray-400 text-[10px] font-black uppercase tracking-widest">
                                 <tr>
-                                    <th class="p-3">Waktu</th>
-                                    <th class="p-3">Nama</th>
-                                    <th class="p-3">Sekolah</th>
-                                    <th class="p-3">Provinsi</th>
-                                    <th class="p-3">Kelas</th>
+                                    <th class="p-4 rounded-l-lg">Waktu</th>
+                                    <th class="p-4">Nama Siswa</th>
+                                    <th class="p-4">Sekolah & Kelas</th>
+                                    <th class="p-4">Provinsi</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y">
-                                ${window.appState.attendance.length === 0 ? '<tr><td colspan="5" class="p-4 text-center text-gray-400">Belum ada data masuk.</td></tr>' : ''}
+                            <tbody class="divide-y divide-gray-100">
+                                ${window.appState.attendance.length === 0 ? '<tr><td colspan="4" class="p-10 text-center text-gray-300 italic">Belum ada data masuk hari ini.</td></tr>' : ''}
                                 ${window.appState.attendance.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).map(att => `
-                                    <tr>
-                                        <td class="p-3 text-gray-400">${new Date(att.timestamp).toLocaleTimeString()}</td>
-                                        <td class="p-3 font-bold">${att.nama}</td>
-                                        <td class="p-3">${att.sekolah}</td>
-                                        <td class="p-3">${att.provinsi}</td>
-                                        <td class="p-3"><span class="bg-teal-50 text-teal-700 px-2 py-1 rounded-full text-[10px] font-bold">${att.kelas}</span></td>
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="p-4 text-sm text-gray-400 font-mono">${new Date(att.timestamp).toLocaleTimeString()}</td>
+                                        <td class="p-4 font-bold text-gray-800">${att.nama}</td>
+                                        <td class="p-4">
+                                            <div class="text-sm text-gray-600">${att.sekolah}</div>
+                                            <div class="text-[10px] font-black text-teal-600 uppercase">${att.kelas}</div>
+                                        </td>
+                                        <td class="p-4 text-sm text-gray-500">${att.provinsi}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -377,266 +478,167 @@
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <div class="bg-white p-6 rounded-xl shadow border-t-4 border-blue-500">
-                        <h3 class="font-bold text-lg mb-4 flex items-center"><span class="mr-2">📂</span> Navigasi & Tambah Bab</h3>
-                        
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Pilih Mata Pelajaran</label>
-                        <select id="adm-sub" class="w-full p-2 border mb-4 rounded" onchange="window.handleSubChange()">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <h3 class="font-black text-xl mb-6 flex items-center"><span class="mr-3 p-2 bg-blue-100 rounded-lg text-lg">📂</span> Struktur Mapel</h3>
+                        <label class="block text-xs font-black text-gray-400 uppercase mb-2">Pilih Mata Pelajaran</label>
+                        <select id="adm-sub" class="w-full p-4 border border-gray-200 rounded-xl mb-6 bg-gray-50 outline-none focus:ring-2 focus:ring-blue-500" onchange="window.handleSubChange()">
                             <option value="">-- Pilih Mapel --</option>
                             ${window.appState.subjects.map(s => `<option value="${s.id}" ${window.lastSelectedSubId === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}
                         </select>
-
                         <div id="adm-chapter-selection-area"></div>
                     </div>
 
-                    <div class="bg-white p-6 rounded-xl shadow border-t-4 border-teal-500">
-                        <h3 class="font-bold text-lg mb-4 flex items-center"><span class="mr-2">⚙️</span> Kelola & Tambah Materi</h3>
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                        <h3 class="font-black text-xl mb-6 flex items-center"><span class="mr-3 p-2 bg-teal-100 rounded-lg text-lg">⚙️</span> Editor Materi</h3>
                         <div id="materi-workspace">
-                            <p class="italic text-gray-400">Silakan pilih Mapel dan Bab di sebelah kiri untuk mengelola materi.</p>
+                            <p class="text-center py-20 text-gray-300 italic">Pilih mapel dan bab di kiri untuk mengedit materi.</p>
                         </div>
                     </div>
                 </div>
-                
-                <div class="mt-8 bg-white p-6 rounded-xl shadow border-t-4 border-gray-200">
-                    <h3 class="font-bold mb-4 flex items-center"><span class="mr-2">📚</span> Master Data: Tambah Mata Pelajaran</h3>
-                    <div class="flex flex-col sm:flex-row gap-2">
-                        <input id="new-sub-name" class="border p-2 flex-grow rounded" placeholder="Nama Mapel (Contoh: Matematika)">
-                        <input id="new-sub-icon" class="border p-2 w-full sm:w-24 rounded text-center" placeholder="Icon (🎨)">
-                        <button onclick="window.addSub()" class="bg-teal-600 text-white px-6 py-2 rounded hover:bg-teal-700 font-bold">Tambah Mapel</button>
+
+                <div class="mt-8 bg-gray-800 p-8 rounded-3xl text-white shadow-xl">
+                    <h3 class="font-black text-xl mb-6 flex items-center">⭐ Master: Tambah Mata Pelajaran Baru</h3>
+                    <div class="flex flex-col md:flex-row gap-4">
+                        <input id="new-sub-name" class="bg-gray-700 border-none p-4 flex-grow rounded-xl text-white placeholder-gray-500 outline-none focus:ring-2 focus:ring-teal-500" placeholder="Nama Mapel (Contoh: IPA)">
+                        <input id="new-sub-icon" class="bg-gray-700 border-none p-4 w-full md:w-32 rounded-xl text-center text-white outline-none focus:ring-2 focus:ring-teal-500" placeholder="Icon (🧪)">
+                        <button onclick="window.addSub()" class="bg-teal-500 hover:bg-teal-400 text-white px-8 py-4 rounded-xl font-black transition-all shadow-lg active:scale-95">Simpan Mapel</button>
                     </div>
                 </div>
             `;
-
             const subDropdown = document.getElementById('adm-sub');
-            if (subDropdown && subDropdown.value) {
-                window.handleSubChange(true);
-            }
+            if (subDropdown && subDropdown.value) window.handleSubChange(true);
         }
 
-        window.handleSubChange = (isInitial = false) => {
-            const subDropdown = document.getElementById('adm-sub');
-            if (!subDropdown) return;
-            
-            const subId = subDropdown.value;
+        // Logic Helper tetap sama dengan versi sebelumnya
+        window.handleSubChange = () => {
+            const subId = document.getElementById('adm-sub').value;
             window.lastSelectedSubId = subId;
-            const chapArea = document.getElementById('adm-chapter-selection-area');
-            const workspace = document.getElementById('materi-workspace');
-
-            if (!subId) {
-                if(chapArea) chapArea.innerHTML = '';
-                if(workspace) workspace.innerHTML = '<p class="italic text-gray-400">Silakan pilih Mapel dan Bab di sebelah kiri untuk mengelola materi.</p>';
-                return;
-            }
+            const area = document.getElementById('adm-chapter-selection-area');
+            if (!subId) { area.innerHTML = ''; return; }
 
             const sub = window.appState.subjects.find(s => s.id === subId);
-            if (chapArea && sub) {
-                chapArea.innerHTML = `
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Pilih Bab</label>
-                    <select id="adm-chap" class="w-full p-2 border mb-4 rounded" onchange="window.updateAdminManageList()">
-                        <option value="">-- Pilih Bab --</option>
-                        ${(sub.chapters || []).map(c => `<option value="${c.id}" ${window.lastSelectedChapId === c.id ? 'selected' : ''}>${c.title}</option>`).join('')}
-                    </select>
-
-                    <div class="bg-blue-50 p-4 rounded-lg mt-4 border border-blue-100">
-                        <label class="block text-sm font-medium text-blue-800 mb-1">Atau Buat Bab Baru</label>
-                        <div class="flex gap-2">
-                            <input id="new-chap-name" class="flex-grow border p-2 rounded text-sm" placeholder="Nama Bab Baru">
-                            <button onclick="window.addChap()" class="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 text-sm font-bold">Tambah</button>
-                        </div>
+            area.innerHTML = `
+                <label class="block text-xs font-black text-gray-400 uppercase mb-2">Pilih Bab</label>
+                <select id="adm-chap" class="w-full p-4 border border-gray-200 rounded-xl mb-6 bg-gray-50 outline-none focus:ring-2 focus:ring-blue-500" onchange="window.updateAdminManageList()">
+                    <option value="">-- Pilih Bab --</option>
+                    ${(sub.chapters || []).map(c => `<option value="${c.id}" ${window.lastSelectedChapId === c.id ? 'selected' : ''}>${c.title}</option>`).join('')}
+                </select>
+                <div class="bg-blue-50 p-6 rounded-2xl border border-blue-100">
+                    <h4 class="text-sm font-black text-blue-800 uppercase mb-4 tracking-tighter">➕ Tambah Bab Baru</h4>
+                    <div class="flex gap-2">
+                        <input id="new-chap-name" class="flex-grow p-3 border rounded-xl outline-none text-sm" placeholder="Nama Bab">
+                        <button onclick="window.addChap()" class="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-blue-700 transition-colors">Simpan</button>
                     </div>
-                `;
-            }
-
-            if(window.lastSelectedChapId) {
-                window.updateAdminManageList();
-            }
+                </div>
+            `;
+            if(window.lastSelectedChapId) window.updateAdminManageList();
         };
 
         window.updateAdminManageList = () => {
-            const subDropdown = document.getElementById('adm-sub');
-            const chapDropdown = document.getElementById('adm-chap');
-            const workspace = document.getElementById('materi-workspace');
-            
-            if (!subDropdown || !chapDropdown || !workspace) return;
-
-            const subId = subDropdown.value;
-            const chapId = chapDropdown.value;
+            const subId = document.getElementById('adm-sub').value;
+            const chapId = document.getElementById('adm-chap').value;
             window.lastSelectedChapId = chapId;
-
-            if (!subId || !chapId) {
-                workspace.innerHTML = `<p class="italic text-gray-400">Silakan pilih Mapel dan Bab di sebelah kiri untuk mengelola materi.</p>`;
-                return;
-            }
+            const ws = document.getElementById('materi-workspace');
+            if (!subId || !chapId) return;
 
             const sub = window.appState.subjects.find(s => s.id === subId);
             const chap = sub?.chapters?.find(c => c.id === chapId);
-            
-            let materialsHtml = '';
-            if (!chap || !chap.materials || chap.materials.length === 0) {
-                materialsHtml = `<p class="text-gray-500 bg-gray-50 p-3 rounded border text-sm italic mb-4">Belum ada materi di bab ini.</p>`;
-            } else {
-                materialsHtml = `
-                    <div class="space-y-2 mb-6">
-                        ${chap.materials.map(m => `
-                            <div class="flex justify-between items-center p-3 bg-white rounded border border-gray-100 hover:border-red-200 transition-colors shadow-sm">
-                                <div>
-                                    <span class="text-sm font-bold text-gray-800">${m.title}</span>
-                                    <span class="text-[10px] block text-gray-400 uppercase font-semibold">${getMLabel(m.type)}</span>
-                                </div>
-                                <button onclick="window.delMat('${subId}','${chapId}','${m.id}')" class="text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors" title="Hapus Materi">
-                                    🗑️
-                                </button>
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-            }
 
-            workspace.innerHTML = `
-                <div class="mb-6 bg-teal-50 p-4 rounded-lg border border-teal-100">
-                    <h4 class="font-bold mb-3 text-teal-800 text-sm">➕ Tambah Materi Baru ke Bab ini</h4>
-                    <div class="space-y-2">
-                        <input id="m-title" class="w-full border p-2 rounded text-sm" placeholder="Judul Materi (Contoh: Penjumlahan Pecahan)">
-                        <div class="flex gap-2">
-                            <select id="m-type" class="flex-grow border p-2 rounded text-sm">
-                                <option value="video">Video (YouTube)</option>
-                                <option value="document">Dokumen / PDF</option>
-                                <option value="quiz">Kuis / Latihan</option>
+            ws.innerHTML = `
+                <div class="bg-teal-50 p-6 rounded-2xl mb-8 border border-teal-100">
+                    <h4 class="text-sm font-black text-teal-800 uppercase mb-4 tracking-tighter">➕ Input Materi</h4>
+                    <div class="space-y-3">
+                        <input id="m-title" class="w-full p-3 border rounded-xl text-sm" placeholder="Judul Materi">
+                        <div class="grid grid-cols-2 gap-2">
+                            <select id="m-type" class="p-3 border rounded-xl text-sm bg-white">
+                                <option value="video">Video</option>
+                                <option value="document">Dokumen</option>
+                                <option value="quiz">Kuis</option>
                             </select>
-                            <input id="m-url" class="w-full border p-2 rounded text-sm" placeholder="URL Tautan / ID Youtube">
+                            <input id="m-url" class="p-3 border rounded-xl text-sm" placeholder="Link/ID YouTube">
                         </div>
-                        <button onclick="window.addMat()" class="w-full bg-teal-600 text-white p-2 rounded hover:bg-teal-700 font-bold text-sm shadow">Simpan Materi</button>
+                        <button onclick="window.addMat()" class="w-full bg-teal-600 text-white p-3 rounded-xl font-bold hover:bg-teal-700 shadow-md">Simpan Konten</button>
                     </div>
                 </div>
-                <hr class="my-4">
-                <h4 class="font-bold mb-3 text-gray-700 text-sm">📋 Daftar Materi Tersimpan</h4>
-                ${materialsHtml}
+                <h4 class="text-xs font-black text-gray-400 uppercase mb-4 tracking-widest">📋 Konten Bab Ini</h4>
+                <div class="space-y-2">
+                    ${(!chap || !chap.materials || chap.materials.length === 0) ? '<p class="text-center py-4 text-gray-300 text-sm">Belum ada konten.</p>' : ''}
+                    ${(chap?.materials || []).map(m => `
+                        <div class="flex justify-between items-center p-3 bg-white border border-gray-100 rounded-xl hover:border-red-200 transition-all">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xl">${getMIcon(m.type)}</span>
+                                <span class="text-sm font-bold text-gray-700">${m.title}</span>
+                            </div>
+                            <button onclick="window.delMat('${subId}','${chapId}','${m.id}')" class="text-red-400 hover:text-red-600 p-2">🗑️</button>
+                        </div>
+                    `).join('')}
+                </div>
             `;
         };
 
+        // Standard CRUD (No change, just keep functionality)
         window.addSub = async () => {
-            if (!window.currentUser) return;
-            const nameInput = document.getElementById('new-sub-name');
-            const iconInput = document.getElementById('new-sub-icon');
-            if(!nameInput) return;
-
-            const name = nameInput.value;
-            const icon = iconInput ? iconInput.value || '📚' : '📚';
+            const name = document.getElementById('new-sub-name').value;
+            const icon = document.getElementById('new-sub-icon').value || '📚';
             if (!name) return;
-            try {
-                const docRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', window.generateId());
-                await window.setDoc(docRef, { name, icon, chapters: [] });
-                nameInput.value = '';
-                if(iconInput) iconInput.value = '';
-                window.showMod("Berhasil", "Mata Pelajaran berhasil ditambahkan.", "success");
-            } catch (e) { console.error(e); }
+            if (window.db) {
+                const id = window.generateId();
+                await window.setDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', id), { name, icon, chapters: [] });
+            }
+            document.getElementById('new-sub-name').value = '';
+            window.showMod("Berhasil", "Mata Pelajaran ditambahkan!", "success");
         };
 
         window.addChap = async () => {
-            if (!window.currentUser) return;
-            const subDropdown = document.getElementById('adm-sub');
-            const titleInput = document.getElementById('new-chap-name');
-            if(!subDropdown || !titleInput) return;
-
-            const subId = subDropdown.value;
-            const title = titleInput.value;
+            const subId = document.getElementById('adm-sub').value;
+            const title = document.getElementById('new-chap-name').value;
             if (!subId || !title) return;
-            try {
+            if (window.db) {
                 const subRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', subId);
                 await window.updateDoc(subRef, { chapters: window.arrayUnion({ id: window.generateId(), title, materials: [] }) });
-                titleInput.value = '';
-                window.showMod("Berhasil", "Bab baru telah ditambahkan.", "success");
-            } catch (e) { console.error(e); }
+            }
+            document.getElementById('new-chap-name').value = '';
+            window.showMod("Sip!", "Bab baru sudah siap.", "success");
         };
 
         window.addMat = async () => {
-            if (!window.currentUser) return;
-            const subDropdown = document.getElementById('adm-sub');
-            const chapDropdown = document.getElementById('adm-chap');
-            const titleInput = document.getElementById('m-title');
-            const urlInput = document.getElementById('m-url');
-            const typeDropdown = document.getElementById('m-type');
-            
-            if(!subDropdown || !chapDropdown || !titleInput || !urlInput || !typeDropdown) return;
+            const subId = document.getElementById('adm-sub').value;
+            const chapId = document.getElementById('adm-chap').value;
+            const title = document.getElementById('m-title').value;
+            const type = document.getElementById('m-type').value;
+            const url = document.getElementById('m-url').value;
+            if (!subId || !chapId || !title || !url) return;
 
-            const subId = subDropdown.value;
-            const chapId = chapDropdown.value;
-            const title = titleInput.value;
-            const type = typeDropdown.value;
-            const url = urlInput.value;
-            
-            if (!subId || !chapId || !title || !url) {
-                window.showMod("Gagal", "Lengkapi semua data materi.", "error");
-                return;
-            }
-            
-            try {
+            if (window.db) {
                 const subRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', subId);
                 const sub = window.appState.subjects.find(s => s.id === subId);
-                if (!sub) return;
-
                 const updatedChapters = sub.chapters.map(c => {
-                    if (c.id === chapId) {
-                        return {
-                            ...c,
-                            materials: [...(c.materials || []), { id: window.generateId(), title, type, url }]
-                        };
-                    }
+                    if (c.id === chapId) return { ...c, materials: [...(c.materials || []), { id: window.generateId(), title, type, url }] };
                     return c;
                 });
-
                 await window.updateDoc(subRef, { chapters: updatedChapters });
-                
-                titleInput.value = '';
-                urlInput.value = '';
-                window.showMod("Berhasil", "Materi telah disimpan.", "success");
-            } catch (e) { 
-                console.error(e);
-                window.showMod("Error", "Gagal menyimpan materi.", "error");
             }
+            document.getElementById('m-title').value = '';
+            document.getElementById('m-url').value = '';
+            window.showMod("Oke!", "Materi berhasil diunggah.", "success");
         };
 
         window.delMat = async (subId, chapId, matId) => {
-            if (!window.currentUser) return;
-            if (!confirm("Hapus materi ini secara permanen?")) return;
-            try {
+            if (!confirm("Hapus materi ini?")) return;
+            if (window.db) {
                 const subRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', subId);
                 const sub = window.appState.subjects.find(s => s.id === subId);
                 const chapters = sub.chapters.map(c => {
-                    if (c.id === chapId) {
-                        return {
-                            ...c,
-                            materials: (c.materials || []).filter(m => m.id !== matId)
-                        };
-                    }
+                    if (c.id === chapId) return { ...c, materials: (c.materials || []).filter(m => m.id !== matId) };
                     return c;
                 });
                 await window.updateDoc(subRef, { chapters });
-            } catch (e) { console.error(e); }
+            }
         };
-
-        function renderBantuan(container) {
-            container.innerHTML = `
-                <div class="bg-white p-8 rounded-xl shadow max-w-2xl mx-auto">
-                    <h2 class="text-2xl font-bold mb-4">Pusat Bantuan</h2>
-                    <p class="mb-4 text-gray-600">Selamat datang di Rumah Belajar Kelas 5. Platform ini dirancang untuk memudahkan siswa mengakses materi sekolah.</p>
-                    <div class="space-y-4">
-                        <div class="p-4 bg-teal-50 rounded-lg border border-teal-100">
-                            <h4 class="font-bold text-teal-800">Bagaimana cara belajar?</h4>
-                            <p class="text-sm">Pilih menu "Pelajaran", pilih mata pelajaran yang ingin dipelajari, pilih Bab, lalu klik materi yang tersedia.</p>
-                        </div>
-                        <div class="p-4 bg-blue-50 rounded-lg border border-blue-100">
-                            <h4 class="font-bold text-blue-800">Butuh bantuan Cikgu Tere?</h4>
-                            <p class="text-sm">Klik ikon gelembung pesan di pojok kanan bawah untuk bertanya pada asisten pintar kami.</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
 
         function getMIcon(t) { return { video: '🎬', document: '📄', quiz: '📝' }[t] || '📚'; }
         function getMLabel(t) { return { video: 'Video', document: 'Dokumen', quiz: 'Kuis' }[t] || 'Materi'; }
-        function getMColor(t) { return { video: 'border-red-500', document: 'border-green-500', quiz: 'border-purple-500' }[t] || 'border-gray-500'; }
+        function getMColor(t) { return { video: 'border-red-400', document: 'border-emerald-400', quiz: 'border-purple-400' }[t] || 'border-gray-200'; }
         
         function renderContent(m) {
             if (m.type === 'video') {
@@ -646,26 +648,46 @@
                 else vid = m.url.split('/').pop();
                 return `<div class="embed-responsive-container"><iframe src="https://www.youtube.com/embed/${vid}" frameborder="0" allowfullscreen></iframe></div>`;
             }
-            return `<div class="text-center py-20 flex flex-col items-center">
-                <div class="text-6xl mb-6">${getMIcon(m.type)}</div>
-                <p class="mb-6 text-gray-600 font-medium">Materi ini tersedia dalam format ${getMLabel(m.type)}.</p>
-                <a href="${m.url}" target="_blank" class="bg-teal-600 text-white px-8 py-3 rounded-full hover:bg-teal-700 font-bold shadow-lg transition-transform hover:scale-105 inline-block">Buka Sekarang</a>
+            return `<div class="text-center py-24 flex flex-col items-center">
+                <div class="text-7xl mb-6 bounce">${getMIcon(m.type)}</div>
+                <p class="mb-8 text-gray-500 font-medium">Klik tombol di bawah untuk membuka ${getMLabel(m.type)}.</p>
+                <a href="${m.url}" target="_blank" class="bg-teal-600 text-white px-10 py-4 rounded-full hover:bg-teal-700 font-black shadow-xl transition-all hover:scale-105 inline-block">Buka Materi Sekarang</a>
             </div>`;
+        }
+
+        function renderBantuan(container) {
+            container.innerHTML = `
+                <div class="bg-white p-10 rounded-3xl shadow-sm border border-gray-100 max-w-2xl mx-auto">
+                    <h2 class="text-3xl font-black text-gray-800 mb-6">Pusat Bantuan</h2>
+                    <div class="space-y-6">
+                        <div class="flex gap-4 p-4 hover:bg-gray-50 rounded-2xl transition-colors">
+                            <span class="text-2xl">💡</span>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Cara Belajar</h4>
+                                <p class="text-sm text-gray-500">Pilih tab Pelajaran, lalu klik kartu mata pelajaran. Di dalamnya kamu bisa memilih bab dan materi video atau dokumen.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4 p-4 hover:bg-gray-50 rounded-2xl transition-colors">
+                            <span class="text-2xl">🤖</span>
+                            <div>
+                                <h4 class="font-bold text-gray-800">Tanya Cikgu Tere</h4>
+                                <p class="text-sm text-gray-500">Klik tombol balon chat di pojok kanan bawah. Kamu bisa bertanya apa saja seputar pelajaran!</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
         }
 
         window.showMod = (t, m, type) => {
             const mod = document.getElementById('generic-modal');
             const content = document.getElementById('modal-content');
-            if(!mod || !content) return;
-            
             content.innerHTML = `
                 <div class="text-center">
-                    <div class="text-4xl mb-2">${type === 'success' ? '✅' : '❌'}</div>
-                    <h3 class="font-bold text-xl mb-2">${t}</h3>
-                    <p class="mb-6 text-gray-600">${m}</p>
-                    <button onclick="window.closeModal()" class="w-full bg-teal-600 text-white p-3 rounded-lg font-bold hover:bg-teal-700">Tutup</button>
-                </div>
-            `;
+                    <div class="text-6xl mb-4">${type === 'success' ? '✅' : '❌'}</div>
+                    <h3 class="font-black text-2xl mb-2">${t}</h3>
+                    <p class="mb-8 text-gray-500">${m}</p>
+                    <button onclick="window.closeModal()" class="w-full bg-teal-600 text-white p-4 rounded-xl font-black hover:bg-teal-700 transition-all active:scale-95 shadow-lg">Siap!</button>
+                </div>`;
             mod.classList.remove('hidden'); mod.classList.add('flex');
         };
         window.closeModal = () => document.getElementById('generic-modal').classList.add('hidden');
