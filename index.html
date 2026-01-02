@@ -55,9 +55,14 @@
             transition: all 0.3s ease;
         }
 
-        .btn-primary:hover {
+        .btn-primary:hover:not(:disabled) {
             transform: translateY(-3px);
             box-shadow: 0 15px 25px -5px rgba(15, 23, 42, 0.25);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .loader {
@@ -110,9 +115,6 @@
             font-size: 0.95rem;
             color: #1e293b;
         }
-
-        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
     </style>
     
     <script type="module">
@@ -148,17 +150,29 @@
                 
                 onAuthStateChanged(window.auth, (user) => {
                     window.currentUser = user;
+                    console.log("Auth State Changed: ", user ? user.uid : "No User");
                     if (user) {
                         window.startDataListeners();
+                        // Update UI jika tombol login sedang tampil
+                        const btn = document.getElementById('btn-save-profile');
+                        if (btn) btn.disabled = false;
                     }
                     window.hideLoading();
                 });
 
                 const initAuth = async () => {
-                    if (initialAuthToken) await signInWithCustomToken(window.auth, initialAuthToken);
-                    else await signInAnonymously(window.auth);
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(window.auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(window.auth);
+                        }
+                    } catch (e) {
+                        console.error("Auth Error:", e);
+                        window.hideLoading();
+                    }
                 };
-                initAuth().catch(() => window.hideLoading());
+                initAuth();
             } catch (err) { window.hideLoading(); }
         } else { setTimeout(window.hideLoading, 800); }
     </script>
@@ -210,33 +224,31 @@
         };
 
         window.startDataListeners = () => {
-            if (!window.db) return;
+            if (!window.db || !window.currentUser) return;
             
             // Listener Pelajaran
             const qSub = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects');
             window.onSnapshot(qSub, (snap) => {
                 window.appState.subjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.renderApp();
-            }, (err) => console.error("Subject error:", err));
+            }, (err) => console.error("Subject listener error:", err));
 
-            // Listener Absensi (Global Real-time)
+            // Listener Absensi
             const qAtt = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
             window.onSnapshot(qAtt, (snap) => {
                 window.appState.attendance = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 
-                // Urutkan berdasarkan waktu terbaru
                 window.appState.attendance.sort((a,b) => {
                     const timeA = a.serverTime?.toMillis() || new Date(a.timestamp).getTime();
                     const timeB = b.serverTime?.toMillis() || new Date(b.timestamp).getTime();
                     return timeB - timeA;
                 });
                 
-                // Jika sedang di tab admin, langsung refresh tabel
                 if (window.appState.activeTab === 'admin') {
                     window.updateAttendanceUI();
                 }
                 window.renderApp();
-            }, (err) => console.error("Attendance error:", err));
+            }, (err) => console.error("Attendance listener error:", err));
         };
 
         window.renderApp = () => {
@@ -274,10 +286,10 @@
 
         window.showNotify = (msg) => {
             const div = document.createElement('div');
-            div.className = "fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-4 rounded-2xl font-bold shadow-2xl z-[9999] animate-bounce";
+            div.className = "fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-4 rounded-2xl font-bold shadow-2xl z-[9999]";
             div.innerText = msg;
             document.body.appendChild(div);
-            setTimeout(() => div.remove(), 2500);
+            setTimeout(() => div.remove(), 3000);
         };
 
         window.goBackToSubjects = () => { 
@@ -312,7 +324,12 @@
                             </select>
                         </div>
                         <input id="s-sekolah" class="input-elegant w-full p-5 rounded-2xl font-bold" placeholder="Asal Sekolah">
-                        <button onclick="window.saveProfile()" class="w-full btn-primary text-white p-6 rounded-2xl font-black uppercase tracking-widest shadow-lg">Masuk Kelas</button>
+                        <button id="btn-save-profile" 
+                                onclick="window.saveProfile()" 
+                                ${!window.currentUser ? 'disabled' : ''}
+                                class="w-full btn-primary text-white p-6 rounded-2xl font-black uppercase tracking-widest shadow-lg">
+                            ${window.currentUser ? 'Masuk Kelas' : 'Menghubungkan...'}
+                        </button>
                     </div>
                 </div>`;
             }
@@ -323,10 +340,19 @@
             const provinsi = document.getElementById('s-prov').value;
             const sekolah = document.getElementById('s-sekolah').value;
             const kelas = document.getElementById('s-kelas').value;
+            const btn = document.getElementById('btn-save-profile');
             
             if (!nama || !sekolah || !provinsi) {
                 window.showNotify("Data belum lengkap!"); return;
             }
+
+            if (!window.db || !window.currentUser) {
+                window.showNotify("Sabar ya, lagi menyambungkan ke database...");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = "Mengirim...";
 
             const profile = { 
                 nama, 
@@ -336,22 +362,20 @@
                 timestamp: new Date().toISOString() 
             };
 
-            if (window.db && window.currentUser) {
-                try {
-                    await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance'), { 
-                        ...profile, 
-                        serverTime: window.serverTimestamp() 
-                    });
-                    localStorage.setItem('student_profile', JSON.stringify(profile));
-                    window.appState.studentProfile = profile;
-                    window.showNotify("Presensi berhasil!");
-                    window.renderApp();
-                } catch(e) { 
-                    console.error("Save error:", e);
-                    window.showNotify("Gagal menyimpan data ke cloud.");
-                }
-            } else {
-                window.showNotify("Belum terhubung ke server.");
+            try {
+                await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance'), { 
+                    ...profile, 
+                    serverTime: window.serverTimestamp() 
+                });
+                localStorage.setItem('student_profile', JSON.stringify(profile));
+                window.appState.studentProfile = profile;
+                window.showNotify("Presensi berhasil!");
+                window.renderApp();
+            } catch(e) { 
+                console.error("Save error:", e);
+                window.showNotify("Gagal: Pastikan koneksi internet stabil.");
+                btn.disabled = false;
+                btn.innerText = "Masuk Kelas";
             }
         };
 
@@ -423,7 +447,7 @@
                         <h3 class="font-black text-xl">Daftar Kehadiran Siswa</h3>
                         <div class="bg-emerald-500 text-white px-4 py-1 rounded-lg font-black" id="att-count">0</div>
                     </div>
-                    <div class="table-container custom-scroll border-2 border-slate-100">
+                    <div class="table-container custom-scroll">
                         <table class="min-w-full">
                             <thead>
                                 <tr>
@@ -434,15 +458,12 @@
                                     <th>Provinsi</th>
                                 </tr>
                             </thead>
-                            <tbody id="attendance-list">
-                                <!-- Data akan masuk via JS -->
-                            </tbody>
+                            <tbody id="attendance-list"></tbody>
                         </table>
                     </div>
                 </div>
             </div>`;
             
-            // Tunggu sebentar untuk memastikan elemen render sebelum update isi
             setTimeout(window.updateAttendanceUI, 50);
         }
 
@@ -485,7 +506,6 @@
         };
 
         window.onload = () => { 
-            // Cek session login admin manual agar tetap konsisten
             if (sessionStorage.getItem('admin_session') === 'active') {
                 window.appState.isAdminLoggedIn = true;
             }
