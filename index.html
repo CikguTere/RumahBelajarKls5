@@ -84,7 +84,6 @@
             border: 2px solid var(--accent);
         }
 
-        /* Styling Tabel Custom */
         .table-container {
             overflow-x: auto;
             border-radius: 1.5rem;
@@ -157,7 +156,9 @@
                 window.auth = getAuth(app);
                 onAuthStateChanged(window.auth, (user) => {
                     window.currentUser = user;
-                    if (user) window.startDataListeners();
+                    if (user) {
+                        window.startDataListeners();
+                    }
                     window.hideLoading();
                 });
                 const initAuth = async () => {
@@ -210,19 +211,36 @@
         window.appState = {
             activeTab: 'login',
             subjects: [],
+            attendance: [],
             studentProfile: JSON.parse(localStorage.getItem('student_profile')) || null,
             isAdminLoggedIn: sessionStorage.getItem('admin_session') === 'active',
             viewingSubject: null
         };
 
+        // Listener Terpusat untuk Real-time Data
         window.startDataListeners = () => {
             if (window.db && !window.listenerActive) {
                 window.listenerActive = true;
+                
+                // 1. Listener Pelajaran
                 const qSub = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects');
                 window.onSnapshot(qSub, (snap) => {
                     window.appState.subjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     window.renderApp();
-                });
+                }, (err) => console.error("Subject Listener Error:", err));
+
+                // 2. Listener Absensi (Global)
+                const qAtt = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
+                window.onSnapshot(qAtt, (snap) => {
+                    window.appState.attendance = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // Sortir berdasarkan waktu terbaru
+                    window.appState.attendance.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    
+                    // Jika sedang di tab admin, render ulang tabelnya saja
+                    if (window.appState.activeTab === 'admin' && window.appState.isAdminLoggedIn) {
+                        window.updateAttendanceUI();
+                    }
+                }, (err) => console.error("Attendance Listener Error:", err));
             }
         };
 
@@ -427,7 +445,6 @@
 
             container.innerHTML = `
             <div class="space-y-12">
-                <!-- Bagian Kelola Pelajaran -->
                 <div class="glass p-12 rounded-[3.5rem] card-shadow">
                     <div class="flex justify-between items-center mb-12">
                         <h2 class="font-black text-4xl text-slate-900 tracking-tighter">Panel Guru</h2>
@@ -469,7 +486,6 @@
 
                 <div id="bab-management-area"></div>
 
-                <!-- Bagian Absensi Siswa (Tampilan Horizontal) -->
                 <div class="glass p-12 rounded-[3.5rem] card-shadow">
                     <div class="flex justify-between items-center mb-10">
                         <div>
@@ -495,14 +511,42 @@
                                 </tr>
                             </thead>
                             <tbody id="attendance-list-horizontal">
-                                <!-- Data akan masuk di sini -->
+                                <!-- Data akan diupdate oleh updateAttendanceUI() -->
                             </tbody>
                         </table>
                     </div>
                 </div>
             </div>`;
-            window.loadAttendance();
+            
+            // Panggil pengisian data awal
+            window.updateAttendanceUI();
         }
+
+        // Fungsi Update UI khusus untuk Tabel Absensi (Tanpa Re-render seluruh page)
+        window.updateAttendanceUI = () => {
+            const list = document.getElementById('attendance-list-horizontal');
+            const count = document.getElementById('att-count');
+            if (!list) return;
+
+            const data = window.appState.attendance;
+            count.innerText = data.length;
+            
+            list.innerHTML = data.map(d => {
+                const dt = new Date(d.timestamp);
+                const dateStr = dt.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                const timeStr = dt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                
+                return `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="font-bold text-slate-600">${dateStr}</td>
+                    <td class="font-black text-emerald-600">${timeStr}</td>
+                    <td class="font-black text-slate-900">${d.nama}</td>
+                    <td class="font-bold text-indigo-600">${d.kelas || '-'}</td>
+                    <td class="font-medium text-slate-500">${d.provinsi || '-'}</td>
+                    <td class="font-extrabold text-slate-700">${d.sekolah}</td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="6" class="text-center text-slate-300 py-16 font-bold italic">Belum ada data absensi.</td></tr>';
+        };
 
         window.checkAdmin = () => {
             const pw = document.getElementById('admin-pw').value;
@@ -517,36 +561,6 @@
             window.appState.isAdminLoggedIn = false;
             sessionStorage.removeItem('admin_session');
             window.renderApp();
-        };
-
-        window.loadAttendance = () => {
-            if (!window.db || !window.appState.isAdminLoggedIn) return;
-            const q = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
-            window.onSnapshot(q, (snap) => {
-                const list = document.getElementById('attendance-list-horizontal');
-                const count = document.getElementById('att-count');
-                if (!list) return;
-                
-                const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                data.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-                
-                count.innerText = data.length;
-                list.innerHTML = data.map(d => {
-                    const dt = new Date(d.timestamp);
-                    const dateStr = dt.toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-                    const timeStr = dt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    
-                    return `
-                    <tr class="hover:bg-slate-50 transition-colors">
-                        <td class="font-bold text-slate-600">${dateStr}</td>
-                        <td class="font-black text-emerald-600">${timeStr}</td>
-                        <td class="font-black text-slate-900">${d.nama}</td>
-                        <td class="font-bold text-indigo-600">${d.kelas || '-'}</td>
-                        <td class="font-medium text-slate-500">${d.provinsi || '-'}</td>
-                        <td class="font-extrabold text-slate-700">${d.sekolah}</td>
-                    </tr>`;
-                }).join('') || '<tr><td colspan="6" class="text-center text-slate-300 py-16 font-bold italic">Belum ada data absensi.</td></tr>';
-            });
         };
 
         window.addSub = async () => {
