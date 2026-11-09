@@ -8,18 +8,17 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
         
-        :root { --accent: #10b981; --accent-soft: #ecfdf5; --bg-main: #fcfdfe; --border-solid: #cbd5e1; }
+        :root { --accent: #10b981; --border-solid: #cbd5e1; }
         body { 
             font-family: 'Plus Jakarta Sans', sans-serif; 
             background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%);
             color: #0f172a; font-size: 18px; min-height: 100vh; display: flex; flex-direction: column;
         }
         .glass { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); border: 2px solid var(--border-solid); }
-        .card-shadow { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02); }
-        .input-elegant { background: #ffffff; border: 2px solid var(--border-solid); transition: all 0.2s ease-in-out; font-size: 1rem; }
-        .input-elegant:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1); outline: none; }
-        .btn-primary { background: linear-gradient(135deg, #0f172a 0%, #334155 100%); transition: all 0.3s ease; }
-        .btn-primary:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 15px 25px -5px rgba(15, 23, 42, 0.25); }
+        .card-shadow { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); }
+        .input-elegant { background: #ffffff; border: 2px solid var(--border-solid); font-size: 1rem; }
+        .input-elegant:focus { border-color: var(--accent); outline: none; }
+        .btn-primary { background: linear-gradient(135deg, #0f172a 0%, #334155 100%); }
         .loader { border: 4px solid #f1f5f9; border-top: 4px solid var(--accent); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #app-container.visible { display: block !important; }
@@ -32,7 +31,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, query, onSnapshot, getDoc, updateDoc, deleteDoc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, query, onSnapshot, updateDoc, addDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyD8mRXy6oyNpHQ6uJ_xX8YS8spWYU0wXTg",
@@ -43,15 +42,16 @@
             appId: "1:69406397949:web:3d0edd30e5bf273b623594"
         };
 
-        // MEMBACA FOLDER LAMA YANG BERISI MATERI KAKAK
-        window.appId = 'default-app-id';
+        // PATH DATABASE MULTI-FOLDER
+        window.materiAppId = 'default-app-id'; // Lokasi Materi & Bab Lama
+        window.absenAppId = 'rumah-belajar-kls-5'; // Lokasi Absensi Admin
 
         const app = initializeApp(firebaseConfig);
         window.db = getFirestore(app);
         window.auth = getAuth(app);
         
-        window.collection = collection; window.doc = doc; window.setDoc = setDoc; window.query = query;
-        window.onSnapshot = onSnapshot; window.getDoc = getDoc; window.updateDoc = updateDoc;
+        window.collection = collection; window.doc = doc; window.query = query;
+        window.onSnapshot = onSnapshot; window.updateDoc = updateDoc;
         window.deleteDoc = deleteDoc; window.addDoc = addDoc; window.serverTimestamp = serverTimestamp;
 
         onAuthStateChanged(window.auth, (user) => {
@@ -63,8 +63,7 @@
         });
 
         const initAuth = async () => {
-            try { await signInAnonymously(window.auth); } 
-            catch (e) { setTimeout(initAuth, 2000); }
+            try { await signInAnonymously(window.auth); } catch (e) { setTimeout(initAuth, 2000); }
         };
         initAuth();
     </script>
@@ -102,30 +101,39 @@
             studentProfile: JSON.parse(localStorage.getItem('student_profile')) || null,
             isAdminLoggedIn: sessionStorage.getItem('admin_session') === 'active',
             viewingSubject: null,
-            adminView: 'manage', // Set default ke manage materi agar langsung kelihatan
+            adminView: 'attendance',
             isSubjectsLoaded: false
         };
 
-        // FUNGSI UNTUK MENGEKSTRAK LINK DENGAN SEGALA KEMUNGKINAN NAMA
+        // MEMBACA LINK DENGAN SEMUA FORMAT VARIABLE
         window.getTopics = (ch) => {
+            if (!ch) return [];
             return ch.topics || ch.materi || ch.items || ch.links || ch.materials || [];
         };
 
         window.startDataListeners = () => {
             if (!window.db || !window.currentUser) return;
             
-            const qSub = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects');
+            // Listener Materi dari default-app-id
+            const qSub = window.collection(window.db, 'artifacts', window.materiAppId, 'public', 'data', 'subjects');
             window.onSnapshot(qSub, (snap) => {
                 window.appState.subjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 window.appState.isSubjectsLoaded = true;
                 window.renderApp();
             });
 
-            const qAtt = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
-            window.onSnapshot(qAtt, (snap) => {
-                window.appState.attendance = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                window.appState.attendance.sort((a,b) => (b.serverTime?.toMillis() || 0) - (a.serverTime?.toMillis() || 0));
-                window.renderApp();
+            // Listener Absensi dari rumah-belajar-kls-5 DAN default-app-id (Gabungan agar tidak ada absen yang hilang)
+            const qAtt1 = window.collection(window.db, 'artifacts', window.absenAppId, 'public', 'data', 'attendance');
+            window.onSnapshot(qAtt1, (snap1) => {
+                const list1 = snap1.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                const qAtt2 = window.collection(window.db, 'artifacts', window.materiAppId, 'public', 'data', 'attendance');
+                window.onSnapshot(qAtt2, (snap2) => {
+                    const list2 = snap2.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    window.appState.attendance = [...list1, ...list2];
+                    window.appState.attendance.sort((a,b) => (b.serverTime?.toMillis() || 0) - (a.serverTime?.toMillis() || 0));
+                    window.renderApp();
+                });
             });
         };
 
@@ -198,7 +206,7 @@
             
             try {
                 const profile = { nama, sekolah, kelas, uid: window.currentUser.uid };
-                await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance'), { ...profile, serverTime: window.serverTimestamp() });
+                await window.addDoc(window.collection(window.db, 'artifacts', window.absenAppId, 'public', 'data', 'attendance'), { ...profile, serverTime: window.serverTimestamp() });
                 localStorage.setItem('student_profile', JSON.stringify(profile));
                 window.appState.studentProfile = profile;
                 window.renderApp();
@@ -221,8 +229,8 @@
                             <h3 class="font-bold text-lg mb-4 text-emerald-600">BAB ${idx+1}: ${ch.title}</h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 ${allTopics.map(t => {
-                                    const tLink = t.link || t.url || t.href || '#';
-                                    const tTitle = t.title || t.judul || t.nama || 'Materi Belajar';
+                                    const tLink = typeof t === 'string' ? t : (t.link || t.url || t.href || '#');
+                                    const tTitle = typeof t === 'string' ? 'Link Materi' : (t.title || t.judul || t.nama || 'Materi Belajar');
                                     return `
                                     <a href="${tLink}" target="_blank" class="p-4 bg-white border border-slate-100 rounded-xl hover:border-emerald-500 flex justify-between group">
                                         <div class="flex items-center gap-3">
@@ -279,16 +287,17 @@
         function renderAdminAttendance() {
             return `
             <div class="glass p-6 rounded-[2rem] card-shadow">
-                <h2 class="text-lg font-black mb-6 text-slate-900">Daftar Kehadiran (Folder default-app-id)</h2>
+                <h2 class="text-lg font-black mb-6 text-slate-900">Daftar Kehadiran Siswa</h2>
                 <div class="table-container">
                     <table class="w-full">
-                        <thead><tr><th>Waktu</th><th>Nama</th><th>Kelas</th></tr></thead>
+                        <thead><tr><th>Waktu</th><th>Nama</th><th>Kelas</th><th>Sekolah</th></tr></thead>
                         <tbody>
                             ${window.appState.attendance.map(a => `
                                 <tr>
                                     <td class="text-[10px] text-slate-400 font-bold">${a.serverTime?.toDate().toLocaleString('id-ID') || 'Baru Saja'}</td>
                                     <td class="font-bold text-slate-700">${a.nama}</td>
                                     <td class="font-black text-emerald-600">${a.kelas}</td>
+                                    <td class="text-slate-500">${a.sekolah || '-'}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -310,7 +319,7 @@
                         <div class="glass p-6 rounded-[2rem] card-shadow border-l-8 border-emerald-500">
                             <div class="flex justify-between items-center mb-6">
                                 <span class="text-xl font-black text-slate-900">${s.icon || '📚'} ${s.name}</span>
-                                <button onclick="window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', '${s.id}'))" class="text-red-400 text-[10px] font-bold">Hapus</button>
+                                <button onclick="window.deleteDoc(window.doc(window.db, 'artifacts', window.materiAppId, 'public', 'data', 'subjects', '${s.id}'))" class="text-red-400 text-[10px] font-bold">Hapus</button>
                             </div>
                             <div class="space-y-4">
                                 ${(s.chapters || []).map((ch, chIdx) => {
@@ -324,7 +333,7 @@
                                         <div class="space-y-2 mb-4">
                                             ${allTopics.map((t, tIdx) => `
                                                 <div class="flex justify-between items-center bg-slate-50 p-2 rounded-lg text-[11px]">
-                                                    <span class="font-bold text-slate-700 truncate">${t.title || t.judul || 'Materi'}</span>
+                                                    <span class="font-bold text-slate-700 truncate">${typeof t === 'string' ? t : (t.title || t.judul || 'Materi')}</span>
                                                     <button onclick="window.removeTopic('${s.id}', ${chIdx}, ${tIdx})" class="text-red-400 px-2 font-bold">×</button>
                                                 </div>
                                             `).join('')}
@@ -357,19 +366,19 @@
 
         window.addMapel = async () => {
             const name = document.getElementById('new-mapel-name').value.trim();
-            if (name) await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects'), { name, icon: '📚', chapters: [] });
+            if (name) await window.addDoc(window.collection(window.db, 'artifacts', window.materiAppId, 'public', 'data', 'subjects'), { name, icon: '📚', chapters: [] });
         };
 
         window.addBab = async (sId) => {
             const input = document.getElementById(`bab-title-${sId}`);
             if (!input.value.trim()) return;
-            const sRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', sId);
+            const sRef = window.doc(window.db, 'artifacts', window.materiAppId, 'public', 'data', 'subjects', sId);
             const chapters = [...(window.appState.subjects.find(s => s.id === sId).chapters || []), { title: input.value.trim(), topics: [] }];
             await window.updateDoc(sRef, { chapters });
         };
 
         window.removeBab = async (sId, idx) => {
-            const sRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', sId);
+            const sRef = window.doc(window.db, 'artifacts', window.materiAppId, 'public', 'data', 'subjects', sId);
             const chapters = [...window.appState.subjects.find(s => s.id === sId).chapters];
             chapters.splice(idx, 1);
             await window.updateDoc(sRef, { chapters });
@@ -379,10 +388,9 @@
             const t = document.getElementById(`topic-t-${sId}-${chIdx}`).value.trim();
             const l = document.getElementById(`topic-l-${sId}-${chIdx}`).value.trim();
             if (!t || !l) return;
-            const sRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', sId);
+            const sRef = window.doc(window.db, 'artifacts', window.materiAppId, 'public', 'data', 'subjects', sId);
             const chapters = JSON.parse(JSON.stringify(window.appState.subjects.find(s => s.id === sId).chapters));
             
-            // Konversi ke format standar agar terbaca konsisten ke depannya
             if (!chapters[chIdx].topics) chapters[chIdx].topics = window.getTopics(chapters[chIdx]);
             chapters[chIdx].topics.push({ title: t, link: l });
             
@@ -390,7 +398,7 @@
         };
 
         window.removeTopic = async (sId, chIdx, tIdx) => {
-            const sRef = window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects', sId);
+            const sRef = window.doc(window.db, 'artifacts', window.materiAppId, 'public', 'data', 'subjects', sId);
             const chapters = JSON.parse(JSON.stringify(window.appState.subjects.find(s => s.id === sId).chapters));
             
             if (!chapters[chIdx].topics) chapters[chIdx].topics = window.getTopics(chapters[chIdx]);
