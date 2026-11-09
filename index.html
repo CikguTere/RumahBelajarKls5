@@ -130,7 +130,7 @@
         }
         
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'rumah-belajar-kls-5';
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
         const app = initializeApp(firebaseConfig);
         window.db = getFirestore(app);
@@ -194,7 +194,8 @@
             studentProfile: JSON.parse(localStorage.getItem('student_profile')) || null,
             isAdminLoggedIn: sessionStorage.getItem('admin_session') === 'active',
             viewingSubject: null,
-            adminView: 'attendance'
+            adminView: 'attendance',
+            isSubjectsLoaded: false
         };
 
         window.startDataListeners = () => {
@@ -203,8 +204,13 @@
             const qSub = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'subjects');
             window.onSnapshot(qSub, (snap) => {
                 window.appState.subjects = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                window.appState.isSubjectsLoaded = true;
                 window.renderApp();
-            }, (error) => console.error("Firestore Error:", error));
+            }, (error) => {
+                console.error("Firestore Error:", error);
+                window.appState.isSubjectsLoaded = true;
+                window.renderApp();
+            });
 
             const qAtt = window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'attendance');
             window.onSnapshot(qAtt, (snap) => {
@@ -348,7 +354,10 @@
                         <p class="text-[10px] text-slate-400 font-bold uppercase mt-2">${(s.chapters || []).length} Bab</p>
                     </div>
                 `).join('')}
-                ${window.appState.subjects.length === 0 ? '<div class="col-span-full py-20 text-center"><div class="loader mx-auto mb-4"></div></div>' : ''}
+                ${!window.appState.isSubjectsLoaded ? 
+                    '<div class="col-span-full py-20 text-center"><div class="loader mx-auto mb-4"></div><p class="text-slate-400 text-sm font-bold">Memuat materi...</p></div>' : 
+                    (window.appState.subjects.length === 0 ? 
+                        '<div class="col-span-full py-20 text-center text-slate-400 font-bold">Belum ada materi pelajaran. Silakan buat materi melalui menu Admin.</div>' : '')}
             </div>`;
         }
 
